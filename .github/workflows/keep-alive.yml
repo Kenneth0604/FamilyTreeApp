@@ -1,0 +1,31 @@
+# Supabase 免費方案 7 天沒有活動會暫停專案,這個排程每 3 天 ping 一次資料庫。
+# 注意:GitHub 對 60 天沒有任何 commit 的 repo 會自動停用排程 workflow,
+#      到時到 Actions 頁面點「Enable workflow」或隨便推一個 commit 即可。
+name: Supabase keep-alive
+
+on:
+  schedule:
+    - cron: '0 3 */3 * *'   # 每 3 天 UTC 03:00(台灣 11:00)
+  workflow_dispatch:
+
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Call rpc/keep_alive
+        env:
+          SUPABASE_URL: ${{ secrets.VITE_SUPABASE_URL }}
+          SUPABASE_ANON_KEY: ${{ secrets.VITE_SUPABASE_ANON_KEY }}
+        run: |
+          set -euo pipefail
+          if [ -z "$SUPABASE_URL" ] || [ -z "$SUPABASE_ANON_KEY" ]; then
+            echo "缺少 VITE_SUPABASE_URL / VITE_SUPABASE_ANON_KEY secrets"; exit 1
+          fi
+          code=$(curl -sS -o /tmp/resp.txt -w '%{http_code}' \
+            -X POST "$SUPABASE_URL/rest/v1/rpc/keep_alive" \
+            -H "apikey: $SUPABASE_ANON_KEY" \
+            -H "Authorization: Bearer $SUPABASE_ANON_KEY" \
+            -H "Content-Type: application/json" \
+            -d '{"p_source":"github-actions"}')
+          echo "HTTP $code — $(cat /tmp/resp.txt)"
+          [ "$code" = "200" ]

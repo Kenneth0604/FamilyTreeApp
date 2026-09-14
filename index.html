@@ -1,0 +1,28 @@
+<!doctype html>
+<html lang="zh-Hant" data-theme="blossom">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
+    <title>家族樹</title>
+    <meta name="theme-color" content="#e86aa8" />
+    <!-- iOS「加入主畫面」相關設定 -->
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <meta name="apple-mobile-web-app-title" content="家族樹" />
+    <link rel="apple-touch-icon" href="/FamilyTreeApp/icons/icon-180.png" />
+    <link rel="icon" type="image/png" sizes="192x192" href="/FamilyTreeApp/icons/icon-192.png" />
+    <link rel="manifest" href="/FamilyTreeApp/manifest.json" />
+    <script>
+      // 在 React 載入前就套用主題,避免閃色
+      try {
+        var t = localStorage.getItem('familytree:theme');
+        if (t === 'graphite' || t === 'blossom') document.documentElement.dataset.theme = t;
+      } catch (e) {}
+    </script>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.jsx"></script>
+  </body>
+</html>
