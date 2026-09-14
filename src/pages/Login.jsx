@@ -4,7 +4,7 @@ import { useStore } from '../lib/store.jsx'
 export default function Login() {
   const { login, signup } = useStore()
   const [mode, setMode] = useState('login') // login | signup
-  const [email, setEmail] = useState('')
+  const [username, setUsername] = useState('')
   const [password, setPassword] = useState('')
   const [error, setError] = useState('')
   const [notice, setNotice] = useState('')
@@ -17,11 +17,14 @@ export default function Login() {
     setBusy(true)
     try {
       if (mode === 'login') {
-        await login(email, password)
+        await login(username, password)
       } else {
-        const { needsConfirm } = await signup(email, password)
+        const { needsConfirm } = await signup(username, password)
         if (needsConfirm) {
-          setNotice('註冊成功!請到信箱點擊驗證連結,完成後回來登入。')
+          setNotice('註冊成功,但這個帳號還在等待驗證,請聯絡管理員。')
+          setMode('login')
+        } else {
+          setNotice('註冊成功!請直接登入。')
           setMode('login')
         }
       }
@@ -52,7 +55,17 @@ export default function Login() {
       </div>
 
       <form onSubmit={onSubmit} className="space-y-3">
-        <input type="email" autoComplete="email" required value={email} onChange={(e) => setEmail(e.target.value)} placeholder="Email" className="input py-3.5" />
+        <input
+          type="text"
+          autoComplete="username"
+          required
+          pattern="[a-zA-Z0-9_-]{2,30}"
+          title="2-30 個英文字母、數字、下底線或減號"
+          value={username}
+          onChange={(e) => setUsername(e.target.value)}
+          placeholder={mode === 'login' ? '帳號' : '設定帳號(英文字母 / 數字 / _ -,2-30 字)'}
+          className="input py-3.5"
+        />
         <input
           type="password"
           autoComplete={mode === 'login' ? 'current-password' : 'new-password'}
@@ -65,7 +78,7 @@ export default function Login() {
         />
         {error && <p className="text-sm text-danger">{error}</p>}
         {notice && <p className="rounded-xl bg-success-soft px-3 py-2 text-sm text-success">{notice}</p>}
-        <button type="submit" disabled={busy || !email || !password} className="btn-primary w-full py-3.5 text-lg">
+        <button type="submit" disabled={busy || !username || !password} className="btn-primary w-full py-3.5 text-lg">
           {busy ? '請稍候…' : mode === 'login' ? '登入' : '建立帳號'}
         </button>
       </form>

@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
-import { useStore } from '../lib/store.jsx'
+import { useStore, authEmailToUsername } from '../lib/store.jsx'
 
 /**
  * 建立新家族 / 用邀請碼加入 / 切換家族
@@ -12,7 +12,7 @@ export default function FamilyGate() {
   const { authUser, memberships, familyId, switchFamily, createFamily, joinFamily, logout } = useStore()
   const { code: codeParam } = useParams()
   const navigate = useNavigate()
-  const defaultName = authUser?.email?.split('@')[0] || ''
+  const defaultName = authEmailToUsername(authUser?.email) || ''
 
   const [tab, setTab] = useState(codeParam ? 'join' : memberships?.length ? 'switch' : 'create')
   const [displayName, setDisplayName] = useState(defaultName)
@@ -158,7 +158,7 @@ export default function FamilyGate() {
           </button>
         )}
         <button onClick={logout} className="text-muted">
-          登出({authUser?.email})
+          登出({authEmailToUsername(authUser?.email)})
         </button>
       </div>
     </div>

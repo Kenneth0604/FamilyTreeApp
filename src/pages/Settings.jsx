@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
-import { useStore } from '../lib/store.jsx'
+import { useStore, authEmailToUsername } from '../lib/store.jsx'
 import { useTheme, THEMES } from '../lib/theme.jsx'
 import { useToast } from '../lib/toast.jsx'
 import PersonPicker from '../components/PersonPicker.jsx'
@@ -143,7 +143,7 @@ export default function Settings() {
           </Row>
           <Row label="帳號">
             <span className="text-sm text-ink" data-selectable>
-              {authUser?.email}
+              {authEmailToUsername(authUser?.email)}
             </span>
           </Row>
         </div>

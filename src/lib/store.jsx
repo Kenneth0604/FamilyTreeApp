@@ -5,7 +5,8 @@ import { useToast } from './toast.jsx'
 
 /**
  * 全域資料層
- * - Auth:email + 密碼(Supabase Auth)
+ * - Auth:帳號 + 密碼(Supabase Auth 底層仍是 email,帳號在前端轉成 帳號@AUTH_EMAIL_DOMAIN 這個不會實際收信的假信箱,
+ *   所以 Supabase 專案要關閉「Confirm email」,否則新帳號永遠收不到驗證信)
  * - 家族群組:一個帳號可加入多個 family,目前使用中的 family 記在 localStorage
  * - 資料:people / parent_child / spouses 一次整包載入(家族樹規模小),
  *   Realtime postgres_changes → 重新抓取;另有 60 秒輪詢與回到前景時重抓作為備援
@@ -18,6 +19,20 @@ const FAMILY_KEY = 'familytree:family'
 const cacheKey = (fid) => `familytree:cache:${fid}`
 const POLL_MS = 60_000
 const WATCHED_TABLES = ['people', 'parent_child', 'spouses', 'family_members', 'families']
+
+const AUTH_EMAIL_DOMAIN = 'familytree.invalid'
+const USERNAME_PATTERN = /^[a-zA-Z0-9_-]{2,30}$/
+
+export function usernameToAuthEmail(username) {
+  const u = String(username || '').trim().toLowerCase()
+  if (!USERNAME_PATTERN.test(u)) throw new Error('帳號格式錯誤,請用 2-30 個英文字母、數字、下底線或減號')
+  return `${u}@${AUTH_EMAIL_DOMAIN}`
+}
+
+/** 從 Supabase Auth 的 email 還原顯示用的帳號(去掉內部假網域) */
+export function authEmailToUsername(email) {
+  return String(email || '').split('@')[0]
+}
 
 function readJSON(key) {
   try {
@@ -46,9 +61,9 @@ function isNetworkError(e) {
 /** 把 Supabase 的錯誤訊息翻成比較好懂的中文 */
 export function friendlyError(e) {
   const m = String(e?.message || e || '')
-  if (/Invalid login credentials/i.test(m)) return 'Email 或密碼錯誤'
-  if (/Email not confirmed/i.test(m)) return '此 Email 尚未完成驗證,請到信箱點擊驗證連結'
-  if (/User already registered/i.test(m)) return '這個 Email 已經註冊過了,請直接登入'
+  if (/Invalid login credentials/i.test(m)) return '帳號或密碼錯誤'
+  if (/Email not confirmed/i.test(m)) return '這個帳號尚未通過驗證,請聯絡管理員確認 Supabase 專案的 Email 驗證設定'
+  if (/User already registered/i.test(m)) return '這個帳號已經註冊過了,請直接登入'
   if (/Password should be at least/i.test(m)) return '密碼至少需要 6 個字元'
   if (/rate limit/i.test(m)) return '操作太頻繁,請稍後再試'
   if (/找不到這個邀請碼/.test(m)) return '找不到這個邀請碼'
@@ -78,15 +93,22 @@ export function StoreProvider({ children }) {
     return () => data.subscription.unsubscribe()
   }, [])
 
-  const login = useCallback(async (email, password) => {
-    const { error } = await supabase.auth.signInWithPassword({ email: email.trim(), password })
+  const login = useCallback(async (username, password) => {
+    let email
+    try {
+      email = usernameToAuthEmail(username)
+    } catch (e) {
+      throw new Error(friendlyError(e))
+    }
+    const { error } = await supabase.auth.signInWithPassword({ email, password })
     if (error) throw new Error(friendlyError(error))
   }, [])
 
-  const signup = useCallback(async (email, password) => {
-    const { data, error } = await supabase.auth.signUp({ email: email.trim(), password })
+  const signup = useCallback(async (username, password) => {
+    const email = usernameToAuthEmail(username) // 拋錯訊息已經是中文,不需要 friendlyError 包一層
+    const { data, error } = await supabase.auth.signUp({ email, password })
     if (error) throw new Error(friendlyError(error))
-    // 專案若開啟「Confirm email」,signUp 不會直接回 session
+    // 專案若開啟「Confirm email」,signUp 不會直接回 session(帳號用的是假信箱,收不到驗證信,務必關閉此設定)
     return { needsConfirm: !data.session }
   }, [])
 
