@@ -3,7 +3,8 @@
 -- 在 Supabase Dashboard → SQL Editor 直接執行整份檔案(可重複執行)。
 --
 -- 資料模型:
---   families        家族群組(邀請碼 = 可編輯加入;查看碼 = 只能查看加入)
+--   families        家族群組
+--   family_codes    每個家族兩種邀請碼:invite_code 加入後可編輯、view_code 加入後只能查看(只有 editor 讀得到)
 --   family_members  「某個登入帳號在某個家族中的身分」(role editor / viewer、self / viewpoint / 進階模式)
 --   people          家族樹上的每一個人(大多數沒有帳號)
 --   parent_child    親子邊(有方向)
@@ -21,11 +22,16 @@ create extension if not exists pgcrypto;
 create table if not exists public.families (
   id           uuid primary key default gen_random_uuid(),
   name         text not null,
-  invite_code  text not null unique,   -- 加入後可編輯
-  view_code    text unique,            -- 加入後只能查看(既有資料在下方補齊後改為 not null)
   created_at   timestamptz not null default now()
 );
-alter table public.families add column if not exists view_code text unique;
+
+-- 邀請碼獨立成表,RLS 只讓 editor 讀(viewer 若讀得到編輯邀請碼就能自行升級)
+drop function if exists public.family_codes(uuid); -- 舊版曾用同名 RPC
+create table if not exists public.family_codes (
+  family_id    uuid primary key references public.families(id) on delete cascade,
+  invite_code  text not null unique,   -- 加入後可編輯
+  view_code    text not null unique    -- 加入後只能查看
+);
 
 create table if not exists public.family_members (
   id                   uuid primary key default gen_random_uuid(),
@@ -155,7 +161,7 @@ begin
   return out;
 end $$;
 
--- 產生一個 invite_code / view_code 都沒用過的新碼
+-- 產生一個兩種邀請碼都沒用過的新碼
 create or replace function public.gen_unique_family_code()
 returns text language plpgsql volatile as $$
 declare
@@ -163,17 +169,31 @@ declare
 begin
   loop
     code := public.gen_invite_code();
-    exit when not exists (select 1 from public.families where invite_code = code or view_code = code);
+    exit when not exists (select 1 from public.family_codes where invite_code = code or view_code = code);
   end loop;
   return code;
 end $$;
 
--- 既有家族補上查看碼
-update public.families set view_code = public.gen_unique_family_code() where view_code is null;
-alter table public.families alter column view_code set not null;
+-- 舊版把邀請碼放在 families 欄位:搬進 family_codes 後移除欄位
+do $$
+begin
+  if exists (select 1 from information_schema.columns where table_schema = 'public' and table_name = 'families' and column_name = 'invite_code') then
+    insert into public.family_codes (family_id, invite_code, view_code)
+      select id, invite_code, public.gen_unique_family_code() from public.families
+      on conflict (family_id) do nothing;
+    alter table public.families drop column invite_code;
+  end if;
+  alter table public.families drop column if exists view_code;
+end $$;
+-- 尚無邀請碼的家族補上
+insert into public.family_codes (family_id, invite_code, view_code)
+  select id, public.gen_unique_family_code(), public.gen_unique_family_code() from public.families
+  on conflict (family_id) do nothing;
+-- 舊版曾把 families 的欄位讀取權限收掉,還原成整表可讀(RLS 仍限制只有成員看得到)
+grant select on public.families to anon, authenticated;
 
 -- ----------------------------------------------------------------------------
--- RPC:建立家族 / 用邀請碼加入 / 用查看碼加入 / 重新產生邀請碼與查看碼
+-- RPC:建立家族 / 用邀請碼加入 / 重新產生邀請碼
 -- ----------------------------------------------------------------------------
 create or replace function public.create_family(p_name text, p_display_name text)
 returns uuid language plpgsql security definer set search_path = public as $$
@@ -182,46 +202,43 @@ declare
 begin
   if auth.uid() is null then raise exception '請先登入'; end if;
   if length(trim(coalesce(p_name, ''))) = 0 then raise exception '請輸入家族名稱'; end if;
-  insert into public.families (name, invite_code, view_code)
-    values (trim(p_name), public.gen_unique_family_code(), public.gen_unique_family_code())
-    returning id into fid;
+  insert into public.families (name) values (trim(p_name)) returning id into fid;
+  insert into public.family_codes (family_id, invite_code, view_code)
+    values (fid, public.gen_unique_family_code(), public.gen_unique_family_code());
   insert into public.family_members (family_id, auth_user_id, display_name, role)
     values (fid, auth.uid(), coalesce(nullif(trim(p_display_name), ''), '成員'), 'editor');
   return fid;
 end $$;
 grant execute on function public.create_family(text, text) to authenticated;
 
--- 邀請碼:加入為可編輯;原本是 viewer 的會升級成 editor
-create or replace function public.join_family(p_invite_code text, p_display_name text)
+-- 一個入口吃兩種邀請碼:編輯邀請碼 → editor(原本是 viewer 的會升級);查看邀請碼 → viewer(已是成員的不會被降級)
+drop function if exists public.join_family(text, text);          -- 參數改名,create or replace 不允許
+drop function if exists public.join_family_as_viewer(text, text); -- 舊版
+create or replace function public.join_family(p_code text, p_display_name text)
 returns uuid language plpgsql security definer set search_path = public as $$
 declare
-  fid uuid;
+  c    text := upper(trim(p_code));
+  fid  uuid;
+  nm   text := coalesce(nullif(trim(p_display_name), ''), '成員');
 begin
   if auth.uid() is null then raise exception '請先登入'; end if;
-  select id into fid from public.families where invite_code = upper(trim(p_invite_code));
-  if fid is null then raise exception '找不到這個邀請碼'; end if;
-  insert into public.family_members (family_id, auth_user_id, display_name, role)
-    values (fid, auth.uid(), coalesce(nullif(trim(p_display_name), ''), '成員'), 'editor')
-    on conflict (family_id, auth_user_id) do update set role = 'editor';
-  return fid;
+  select family_id into fid from public.family_codes where invite_code = c;
+  if fid is not null then
+    insert into public.family_members (family_id, auth_user_id, display_name, role)
+      values (fid, auth.uid(), nm, 'editor')
+      on conflict (family_id, auth_user_id) do update set role = 'editor';
+    return fid;
+  end if;
+  select family_id into fid from public.family_codes where view_code = c;
+  if fid is not null then
+    insert into public.family_members (family_id, auth_user_id, display_name, role)
+      values (fid, auth.uid(), nm, 'viewer')
+      on conflict (family_id, auth_user_id) do nothing;
+    return fid;
+  end if;
+  raise exception '找不到這個邀請碼';
 end $$;
 grant execute on function public.join_family(text, text) to authenticated;
-
--- 查看碼:加入為只能查看;已是成員的不會被降級
-create or replace function public.join_family_as_viewer(p_view_code text, p_display_name text)
-returns uuid language plpgsql security definer set search_path = public as $$
-declare
-  fid uuid;
-begin
-  if auth.uid() is null then raise exception '請先登入'; end if;
-  select id into fid from public.families where view_code = upper(trim(p_view_code));
-  if fid is null then raise exception '找不到這個查看碼'; end if;
-  insert into public.family_members (family_id, auth_user_id, display_name, role)
-    values (fid, auth.uid(), coalesce(nullif(trim(p_display_name), ''), '成員'), 'viewer')
-    on conflict (family_id, auth_user_id) do nothing;
-  return fid;
-end $$;
-grant execute on function public.join_family_as_viewer(text, text) to authenticated;
 
 create or replace function public.regenerate_invite_code(p_family_id uuid)
 returns text language plpgsql security definer set search_path = public as $$
@@ -230,7 +247,7 @@ declare
 begin
   if not public.is_family_editor(p_family_id) then raise exception '只有可編輯的成員才能重新產生邀請碼'; end if;
   code := public.gen_unique_family_code();
-  update public.families set invite_code = code where id = p_family_id;
+  update public.family_codes set invite_code = code where family_id = p_family_id;
   return code;
 end $$;
 grant execute on function public.regenerate_invite_code(uuid) to authenticated;
@@ -240,28 +257,18 @@ returns text language plpgsql security definer set search_path = public as $$
 declare
   code text;
 begin
-  if not public.is_family_editor(p_family_id) then raise exception '只有可編輯的成員才能重新產生查看碼'; end if;
+  if not public.is_family_editor(p_family_id) then raise exception '只有可編輯的成員才能重新產生邀請碼'; end if;
   code := public.gen_unique_family_code();
-  update public.families set view_code = code where id = p_family_id;
+  update public.family_codes set view_code = code where family_id = p_family_id;
   return code;
 end $$;
 grant execute on function public.regenerate_view_code(uuid) to authenticated;
-
--- 邀請碼 / 查看碼只給 editor 看(否則 viewer 讀到邀請碼就能自行升級),其餘欄位所有成員可讀
-revoke select on public.families from anon, authenticated;
-grant select (id, name, created_at) on public.families to authenticated;
-
-create or replace function public.family_codes(p_family_id uuid)
-returns table (invite_code text, view_code text) language sql stable security definer set search_path = public as $$
-  select f.invite_code, f.view_code from public.families f
-  where f.id = p_family_id and public.is_family_editor(p_family_id);
-$$;
-grant execute on function public.family_codes(uuid) to authenticated;
 
 -- ----------------------------------------------------------------------------
 -- Row Level Security
 -- ----------------------------------------------------------------------------
 alter table public.families       enable row level security;
+alter table public.family_codes   enable row level security;
 alter table public.family_members enable row level security;
 alter table public.people         enable row level security;
 alter table public.parent_child   enable row level security;
@@ -273,7 +280,12 @@ create policy "families member select" on public.families for select to authenti
   using (public.is_family_member(id));
 create policy "families member update" on public.families for update to authenticated
   using (public.is_family_editor(id)) with check (public.is_family_editor(id));
--- insert / 邀請碼查詢一律經由 RPC(security definer)
+-- insert 一律經由 RPC(security definer)
+
+-- 兩種邀請碼只有 editor 看得到;寫入一律經由 RPC
+drop policy if exists "family_codes editor select" on public.family_codes;
+create policy "family_codes editor select" on public.family_codes for select to authenticated
+  using (public.is_family_editor(family_id));
 
 drop policy if exists "members select" on public.family_members;
 drop policy if exists "members update own" on public.family_members;
@@ -347,7 +359,7 @@ grant execute on function public.keep_alive(text) to anon, authenticated;
 do $$
 declare t text;
 begin
-  foreach t in array array['families', 'family_members', 'people', 'parent_child', 'spouses'] loop
+  foreach t in array array['families', 'family_codes', 'family_members', 'people', 'parent_child', 'spouses'] loop
     begin
       execute format('alter publication supabase_realtime add table public.%I', t);
     exception when duplicate_object then

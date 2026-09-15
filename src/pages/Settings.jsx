@@ -29,7 +29,7 @@ export default function Settings() {
 
   const base = `${window.location.origin}${import.meta.env.BASE_URL}#`
   const inviteLink = codes ? `${base}/join/${codes.invite_code}` : ''
-  const viewLink = codes ? `${base}/view/${codes.view_code}` : ''
+  const viewLink = codes ? `${base}/join/${codes.view_code}` : ''
 
   async function copy(text, label) {
     try {
@@ -43,8 +43,8 @@ export default function Settings() {
   async function share(kind) {
     const text =
       kind === 'view'
-        ? `邀請你查看「${family?.name}」的家族樹!查看碼:${codes?.view_code}\n${viewLink}`
-        : `邀請你加入「${family?.name}」的家族樹!邀請碼:${codes?.invite_code}\n${inviteLink}`
+        ? `邀請你查看「${family?.name}」的家族樹!邀請碼(只能查看):${codes?.view_code}\n${viewLink}`
+        : `邀請你加入「${family?.name}」的家族樹!邀請碼(可編輯):${codes?.invite_code}\n${inviteLink}`
     if (navigator.share) {
       try {
         await navigator.share({ title: '家族樹邀請', text })
@@ -97,9 +97,10 @@ export default function Settings() {
       {canEdit ? (
         <section>
           <h2 className="section-title">邀請家人加入</h2>
+          <p className="mb-2 text-xs text-muted">兩種邀請碼都在同一個「輸入邀請碼」頁輸入,身分由碼決定。</p>
           <div className="space-y-3">
             <CodeCard
-              title="邀請碼 · 可一起編輯"
+              title="可編輯的邀請碼"
               code={codes?.invite_code}
               link={inviteLink}
               busy={busy}
@@ -109,20 +110,20 @@ export default function Settings() {
               onRegenerate={() => window.confirm('重新產生後,舊的邀請碼與連結會立即失效。確定嗎?') && guard(() => store.regenerateInvite(), '已產生新的邀請碼')}
             />
             <CodeCard
-              title="查看碼 · 只能瀏覽"
+              title="只能查看的邀請碼"
               code={codes?.view_code}
               link={viewLink}
               busy={busy}
-              onCopyCode={() => copy(codes?.view_code || '', '查看碼')}
+              onCopyCode={() => copy(codes?.view_code || '', '邀請碼')}
               onShare={() => share('view')}
-              onCopyLink={() => copy(viewLink, '查看連結')}
-              onRegenerate={() => window.confirm('重新產生後,舊的查看碼與連結會立即失效。確定嗎?') && guard(() => store.regenerateViewCode(), '已產生新的查看碼')}
+              onCopyLink={() => copy(viewLink, '邀請連結')}
+              onRegenerate={() => window.confirm('重新產生後,舊的邀請碼與連結會立即失效。確定嗎?') && guard(() => store.regenerateViewCode(), '已產生新的邀請碼')}
             />
           </div>
         </section>
       ) : (
         <section>
-          <p className="rounded-2xl bg-info-soft px-4 py-3 text-sm text-info">你是用查看碼加入這個家族的,只能瀏覽,不能新增或修改成員。想一起編輯請向家族成員索取邀請碼。</p>
+          <p className="rounded-2xl bg-info-soft px-4 py-3 text-sm text-info">你是用「只能查看」的邀請碼加入這個家族的,可以瀏覽但不能新增或修改成員。想一起編輯,請向家族成員索取「可編輯」的邀請碼再輸入一次即可升級。</p>
         </section>
       )}
 

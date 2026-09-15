@@ -18,7 +18,7 @@ const StoreContext = createContext(null)
 const FAMILY_KEY = 'familytree:family'
 const cacheKey = (fid) => `familytree:cache:${fid}`
 const POLL_MS = 60_000
-const WATCHED_TABLES = ['people', 'parent_child', 'spouses', 'family_members', 'families']
+const WATCHED_TABLES = ['people', 'parent_child', 'spouses', 'family_members', 'families', 'family_codes']
 
 const AUTH_EMAIL_DOMAIN = 'familytree.invalid'
 const USERNAME_PATTERN = /^[a-zA-Z0-9_-]{2,30}$/
@@ -67,8 +67,7 @@ export function friendlyError(e) {
   if (/Password should be at least/i.test(m)) return '密碼至少需要 6 個字元'
   if (/rate limit/i.test(m)) return '操作太頻繁,請稍後再試'
   if (/找不到這個邀請碼/.test(m)) return '找不到這個邀請碼'
-  if (/找不到這個查看碼/.test(m)) return '找不到這個查看碼'
-  if (/row-level security|permission denied/i.test(m)) return '你在這個家族只能查看,不能編輯'
+  if (/row-level security/i.test(m)) return '你在這個家族只能查看,不能編輯'
   if (/duplicate key.*spouses_pair/i.test(m)) return '這兩個人已經有配偶紀錄了'
   if (/duplicate key.*parent_child/i.test(m)) return '這組親子關係已經存在'
   if (/parent_child_check/i.test(m)) return '不能把自己設成自己的父母'
@@ -186,21 +185,10 @@ export function StoreProvider({ children }) {
     [loadMemberships, switchFamily],
   )
 
+  // 同一個入口吃兩種邀請碼,後端依碼的種類決定 editor / viewer
   const joinFamily = useCallback(
     async (code, displayName) => {
-      const { data, error } = await supabase.rpc('join_family', { p_invite_code: code, p_display_name: displayName })
-      if (error) throw new Error(friendlyError(error))
-      const list = await loadMemberships()
-      setMemberships(list)
-      switchFamily(data)
-      return data
-    },
-    [loadMemberships, switchFamily],
-  )
-
-  const joinFamilyAsViewer = useCallback(
-    async (code, displayName) => {
-      const { data, error } = await supabase.rpc('join_family_as_viewer', { p_view_code: code, p_display_name: displayName })
+      const { data, error } = await supabase.rpc('join_family', { p_code: code, p_display_name: displayName })
       if (error) throw new Error(friendlyError(error))
       const list = await loadMemberships()
       setMemberships(list)
@@ -242,12 +230,13 @@ export function StoreProvider({ children }) {
         supabase.from('people').select('*').eq('family_id', familyId).order('created_at'),
         supabase.from('parent_child').select('*').eq('family_id', familyId),
         supabase.from('spouses').select('*').eq('family_id', familyId),
-        supabase.rpc('family_codes', { p_family_id: familyId }),
+        // viewer 被 RLS 擋掉會拿到 null(不是錯誤)
+        supabase.from('family_codes').select('*').eq('family_id', familyId).maybeSingle(),
       ])
       for (const r of [fam, mem, ppl, pc, sp]) throwIf(r.error)
       const snap = { family: fam.data, members: mem.data ?? [], people: ppl.data ?? [], parentChild: pc.data ?? [], spouses: sp.data ?? [], at: Date.now() }
       applySnapshot(snap)
-      setCodes(cd.error ? null : (cd.data?.[0] ?? null))
+      setCodes(cd.error ? null : cd.data)
       writeJSON(cacheKey(familyId), snap)
       setOffline(false)
       setFatal('')
@@ -526,7 +515,7 @@ export function StoreProvider({ children }) {
       configured: isConfigured,
       authLoading, authUser, login, signup, logout,
       memberships, membershipsError, retryMemberships: () => setMembershipAttempt((n) => n + 1),
-      familyId, family, codes, member, members, canEdit, switchFamily, createFamily, joinFamily, joinFamilyAsViewer, leaveFamily, renameFamily, regenerateInvite, regenerateViewCode,
+      familyId, family, codes, member, members, canEdit, switchFamily, createFamily, joinFamily, leaveFamily, renameFamily, regenerateInvite, regenerateViewCode,
       people, parentChild, spouses, graph, peopleById, nameOf, memberName,
       ready, fatal, retry, refresh, offline, syncing,
       viewpointId, selfId, advanced, terms, termFor,
@@ -536,7 +525,7 @@ export function StoreProvider({ children }) {
     }),
     [
       authLoading, authUser, login, signup, logout, memberships, membershipsError, familyId, family, codes, member, members, canEdit,
-      switchFamily, createFamily, joinFamily, joinFamilyAsViewer, leaveFamily, renameFamily, regenerateInvite, regenerateViewCode, people, parentChild, spouses,
+      switchFamily, createFamily, joinFamily, leaveFamily, renameFamily, regenerateInvite, regenerateViewCode, people, parentChild, spouses,
       graph, peopleById, nameOf, memberName, ready, fatal, retry, refresh, offline, syncing, viewpointId, selfId, advanced,
       terms, termFor, addPerson, updatePerson, deletePerson, addParentChild, removeParentChild, addSpouse, updateSpouse,
       removeSpouse, setViewpoint, setSelf, setAdvanced, setDisplayName, toast,

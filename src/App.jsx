@@ -32,8 +32,7 @@ export default function App() {
   if (!familyId) {
     return (
       <Routes>
-        <Route path="/join/:code" element={<FamilyGate mode="join" />} />
-        <Route path="/view/:code" element={<FamilyGate mode="view" />} />
+        <Route path="/join/:code" element={<FamilyGate />} />
         <Route path="*" element={<FamilyGate />} />
       </Routes>
     )
@@ -44,8 +43,7 @@ export default function App() {
 
   return (
     <Routes>
-      <Route path="/join/:code" element={<FamilyGate mode="join" />} />
-      <Route path="/view/:code" element={<FamilyGate mode="view" />} />
+      <Route path="/join/:code" element={<FamilyGate />} />
       <Route path="/family" element={<FamilyGate />} />
       <Route element={<Layout />}>
         <Route index element={<Tree />} />
