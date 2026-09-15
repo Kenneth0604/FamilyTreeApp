@@ -7,6 +7,7 @@ import TermBadge from '../components/TermBadge.jsx'
 import PersonPicker from '../components/PersonPicker.jsx'
 import LifeEntries from '../components/LifeEntries.jsx'
 import StatsPanel from '../components/StatsPanel.jsx'
+import PetCard from '../components/PetCard.jsx'
 import { ageLabel, birthLabel, birthOrderLabel, GENDER_LABEL, SPOUSE_STATUS_LABEL, relativeTime } from '../lib/format.js'
 import { computeRelationTerm } from '../lib/kinship/index.js'
 import { compareSiblings } from '../lib/kinship/birth.js'
@@ -16,7 +17,7 @@ export default function PersonDetail() {
   const navigate = useNavigate()
   const toast = useToast()
   const store = useStore()
-  const { peopleById, graph, parentChild, spouses, termFor, viewpointId, selfId, advanced, memberName, nameOf, canEdit } = store
+  const { peopleById, graph, parentChild, spouses, pets, termFor, viewpointId, selfId, advanced, memberName, nameOf, canEdit } = store
   const person = peopleById.get(id)
 
   const [adding, setAdding] = useState(null) // 'parent' | 'child' | 'spouse' | 'sibling' | null
@@ -252,6 +253,31 @@ export default function PersonDetail() {
 
       {/* 生平紀事 */}
       <LifeEntries personId={id} />
+
+      {/* 寵物 */}
+      {(pets.some((p) => p.owner_person_id === id) || canEdit) && (
+        <section className="card p-4">
+          <div className="mb-2 flex items-center justify-between">
+            <h2 className="section-title mb-0">🐾 寵物</h2>
+            {canEdit && (
+              <Link to={`/pets/new?owner=${id}`} className="text-sm text-primary">
+                ＋ 新增
+              </Link>
+            )}
+          </div>
+          {pets.filter((p) => p.owner_person_id === id).length === 0 ? (
+            <p className="text-xs text-muted">{person.name} 還沒有登記寵物</p>
+          ) : (
+            <div className="space-y-2">
+              {pets
+                .filter((p) => p.owner_person_id === id)
+                .map((p) => (
+                  <PetCard key={p.id} pet={p} showOwner={false} />
+                ))}
+            </div>
+          )}
+        </section>
+      )}
 
       {/* 編輯紀錄 */}
       <section className="px-1 text-xs text-muted">

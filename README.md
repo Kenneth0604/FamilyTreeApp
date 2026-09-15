@@ -23,6 +23,7 @@
 | 新增 / 編輯 | 姓名、性別、生日(可只填年份)、是否過世、大頭照、備註;新增時選「跟樹上哪位成員是什麼關係」(父母 / 子女 / 配偶 / 兄弟姊妹)。選兄弟姊妹但對方沒有父母時,自動建立可稍後補資料的父 / 母佔位節點 |
 | 詳細頁 | 基本資料(姓名旁顯示多個小名、#自訂標籤)、與視角的稱謂(含推算路徑)、管理父母 / 配偶・伴侶(已婚 / 未婚伴侶 / 離婚 / 前伴侶 / 喪偶)/ 子女關係、兄弟姊妹(自動推算) |
 | 戰力與屬性 | 戰力(家庭地位 0–10,決定樹狀圖卡片大小)+ 遊戲角色式屬性:有趣 / 有病 / 脾氣 / 聰明 / 學歷 / 有錢 / 顏值 / 廚藝 / 酒量 / 愛唸 / 運氣 / 固執 / 八卦…共 30 項可挑,拉滑桿評 0–10 分,顯示數值條與低 / 高分描述,並算出綜合評分、等級(S–D)、稱號、最強 / 最弱屬性 |
+| 寵物 | 名字、種類(狗 / 貓 / 兔 / 鳥 / 魚 / 鼠 / 龜 / 爬蟲 / 其他)、品種、性別、主人(可不指定)、生日、照片、備註;寵物評分 15 項(可愛 / 黏人 / 撒嬌 / 聰明 / 聽話 / 社交 / 膽子 / 貪吃 / 懶 / 顏值 / 地位,負面:搗蛋 / 音量 / 掉毛 / 看醫生),綜合評分等級 S 鎮宅神獸 → D 還在調教。列在成員頁底下,也顯示在主人的詳細頁 |
 | 生平紀事 | 履歷式條列:職業經歷 / 學歷 / 重要事蹟 / 健康・疾病 / 居住地 / 榮譽獎項 / 其他,各區 1. 2. 3. 依時間排序;每筆有標題、起迄時間(可只填年份、可勾「至今」)與詳細說明 |
 | 設定 | 切換視角(我是誰)、綁定帳號的真實身分、進階稱謂模式、兩種邀請碼管理(分享 / 重新產生,僅可編輯成員可見)、家族名稱、主題(粉粉 / 黑黑)、切換家族、離開家族 |
 | 即時同步 | Supabase Realtime + 60 秒輪詢 + 回到前景時重抓 |
@@ -87,6 +88,7 @@ npm test
 | `people` | name、nicknames(text[])、tags(text[])、gender(male / female / unspecified)、birth_date(文字,`YYYY` / `YYYY-MM` / `YYYY-MM-DD` 或 null)、birth_order(排行,1 = 老大;生日分不出長幼時用)、is_deceased、avatar_url、note、stats(jsonb,{屬性 id: 0–10})、power(0–10 戰力)、created_by / updated_by / updated_at |
 | `parent_child` | parent_id → child_id |
 | `spouses` | person_a_id、person_b_id、status(married / widowed / partner 未婚伴侶 / divorced / ex_partner 前伴侶);已結束的關係(divorced / ex_partner)稱謂推算不走、樹狀圖不並排,但仍可有共同子女 |
+| `pets` | 寵物:owner_person_id(可 null)、name、species、breed、gender、birth_date、is_deceased、avatar_url、note、stats(jsonb) |
 | `person_entries` | 生平紀事:person_id、category(career / education / event / health / residence / award / other)、title、detail、start_date / end_date(同 birth_date 格式)、ongoing |
 
 RLS:所有表以 `is_family_member(family_id)` 判斷讀取,寫入另需 `is_family_editor(family_id)`(`family_members.role = 'editor'`);兩種邀請碼放在獨立的 `family_codes` 表,RLS 只讓 editor 讀。建立家族 / 加入(`join_family` 依碼是 invite_code 或 view_code 給 editor / viewer)/ 重新產生兩種碼都透過 security definer 的 RPC。

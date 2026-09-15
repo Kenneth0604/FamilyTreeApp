@@ -8,6 +8,7 @@
 --   family_members  「某個登入帳號在某個家族中的身分」(role editor / viewer、self / viewpoint / 進階模式)
 --   people          家族樹上的每一個人(大多數沒有帳號;nicknames 小名、tags 自訂標籤、birth_order 排行、stats 遊戲式屬性分數、power 戰力 / 家庭地位)
 --   person_entries  生平紀事:每人多筆履歷式條列(職業 / 學歷 / 事蹟 / 健康疾病 / 居住地 / 榮譽 / 其他),含起迄時間
+--   pets            寵物(名字、品種、主人、評分)
 --   parent_child    親子邊(有方向)
 --   spouses         配偶 / 伴侶邊(無方向;married / widowed / partner 未婚伴侶 / divorced / ex_partner 前伴侶)
 -- 兄弟姊妹、叔伯、堂表…全部由前端的稱謂引擎以最短路徑推算,不另外儲存。
@@ -140,6 +141,28 @@ alter table public.person_entries add constraint person_entries_category_check c
 create index if not exists person_entries_family_idx on public.person_entries(family_id);
 create index if not exists person_entries_person_idx on public.person_entries(person_id);
 
+-- 寵物:名字、品種、主人(可不指定)、生日、照片、遊戲式評分
+create table if not exists public.pets (
+  id               uuid primary key default gen_random_uuid(),
+  family_id        uuid not null references public.families(id) on delete cascade,
+  owner_person_id  uuid references public.people(id) on delete set null,
+  name             text not null check (length(trim(name)) > 0),
+  species          text not null default 'other' check (species in ('dog', 'cat', 'rabbit', 'bird', 'fish', 'hamster', 'turtle', 'reptile', 'other')),
+  breed            text not null default '',
+  gender           text not null default 'unspecified' check (gender in ('male', 'female', 'unspecified')),
+  birth_date       text check (birth_date is null or birth_date ~ '^\d{4}(-\d{2}(-\d{2})?)?$'),
+  is_deceased      boolean not null default false,
+  avatar_url       text,
+  note             text not null default '',
+  stats            jsonb not null default '{}'::jsonb,
+  created_by       uuid references public.family_members(id) on delete set null,
+  updated_by       uuid references public.family_members(id) on delete set null,
+  created_at       timestamptz not null default now(),
+  updated_at       timestamptz not null default now()
+);
+create index if not exists pets_family_idx on public.pets(family_id);
+create index if not exists pets_owner_idx  on public.pets(owner_person_id);
+
 create index if not exists people_family_idx        on public.people(family_id);
 create index if not exists parent_child_family_idx  on public.parent_child(family_id);
 create index if not exists parent_child_child_idx   on public.parent_child(child_id);
@@ -166,6 +189,10 @@ create trigger spouses_touch before update on public.spouses
 
 drop trigger if exists person_entries_touch on public.person_entries;
 create trigger person_entries_touch before update on public.person_entries
+  for each row execute function public.touch_updated_at();
+
+drop trigger if exists pets_touch on public.pets;
+create trigger pets_touch before update on public.pets
   for each row execute function public.touch_updated_at();
 
 -- ----------------------------------------------------------------------------
@@ -317,6 +344,7 @@ alter table public.people         enable row level security;
 alter table public.parent_child   enable row level security;
 alter table public.spouses        enable row level security;
 alter table public.person_entries enable row level security;
+alter table public.pets           enable row level security;
 
 drop policy if exists "families member select" on public.families;
 drop policy if exists "families member update" on public.families;
@@ -346,7 +374,7 @@ create policy "members delete own" on public.family_members for delete to authen
 do $$
 declare t text;
 begin
-  foreach t in array array['people', 'parent_child', 'spouses', 'person_entries'] loop
+  foreach t in array array['people', 'parent_child', 'spouses', 'person_entries', 'pets'] loop
     execute format('drop policy if exists %I on public.%I', t || ' member all', t);
     execute format('drop policy if exists %I on public.%I', t || ' member select', t);
     execute format('drop policy if exists %I on public.%I', t || ' editor insert', t);
@@ -403,7 +431,7 @@ grant execute on function public.keep_alive(text) to anon, authenticated;
 do $$
 declare t text;
 begin
-  foreach t in array array['families', 'family_codes', 'family_members', 'people', 'parent_child', 'spouses', 'person_entries'] loop
+  foreach t in array array['families', 'family_codes', 'family_members', 'people', 'parent_child', 'spouses', 'person_entries', 'pets'] loop
     begin
       execute format('alter publication supabase_realtime add table public.%I', t);
     exception when duplicate_object then

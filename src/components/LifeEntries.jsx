@@ -180,7 +180,7 @@ const TITLE_PLACEHOLDER = {
 }
 
 /** 年 / 月 / 日三格,月日可省略;value = { y, m, d } */
-function PartialDateInput({ value, onChange, disabled }) {
+export function PartialDateInput({ value, onChange, disabled }) {
   const y = value.y ?? ''
   const m = value.m ?? ''
   const d = value.d ?? ''

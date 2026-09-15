@@ -154,15 +154,59 @@ const RANKS = [
 /** 負面屬性反過來算:有病 8 分 = 只值 2 分 */
 export const effectiveStat = (stat, value) => (stat.negative ? 10 - value : value)
 
-/** 綜合評分:已評屬性(負面者反算)的平均 × 10(0–100),附等級、稱號、最強 / 最弱屬性;沒評任何屬性回 null */
-export function overallRating(stats) {
-  const items = STATS.filter((s) => Number.isFinite(stats?.[s.id])).map((s) => ({ ...s, value: stats[s.id], effective: effectiveStat(s, stats[s.id]) }))
+/**
+ * 綜合評分:已評屬性(負面者反算)的平均 × 10(0–100),附等級、稱號、最強 / 最弱屬性;沒評任何屬性回 null
+ * catalog / ranks 可換成寵物的
+ */
+export function overallRating(stats, catalog = STATS, ranks = RANKS) {
+  const items = catalog.filter((s) => Number.isFinite(stats?.[s.id])).map((s) => ({ ...s, value: stats[s.id], effective: effectiveStat(s, stats[s.id]) }))
   if (!items.length) return null
   const score = Math.round((items.reduce((a, s) => a + s.effective, 0) / items.length) * 10)
-  const [, rank, title] = RANKS.find(([min]) => score >= min)
+  const [, rank, title] = ranks.find(([min]) => score >= min)
   const sorted = [...items].sort((a, b) => b.effective - a.effective)
   return { score, rank, title, count: items.length, best: sorted[0], worst: sorted.length > 1 ? sorted[sorted.length - 1] : null }
 }
+
+// ---- 寵物 ----
+export const PET_SPECIES = [
+  { id: 'dog', label: '狗', icon: '🐶' },
+  { id: 'cat', label: '貓', icon: '🐱' },
+  { id: 'rabbit', label: '兔', icon: '🐰' },
+  { id: 'bird', label: '鳥', icon: '🐦' },
+  { id: 'fish', label: '魚', icon: '🐟' },
+  { id: 'hamster', label: '鼠', icon: '🐹' },
+  { id: 'turtle', label: '龜', icon: '🐢' },
+  { id: 'reptile', label: '爬蟲', icon: '🦎' },
+  { id: 'other', label: '其他', icon: '🐾' },
+]
+export const PET_SPECIES_BY_ID = Object.fromEntries(PET_SPECIES.map((s) => [s.id, s]))
+export const PET_GENDER_LABEL = { male: '公', female: '母', unspecified: '未指定' }
+
+/** 寵物屬性(0–10),negative 者越高越糟 */
+export const PET_STATS = [
+  { id: 'cute', label: '可愛', icon: '🥹', low: '長相隨性', high: '融化全家' },
+  { id: 'clingy', label: '黏人', icon: '🫂', low: '高冷', high: '人形口香糖' },
+  { id: 'spoiled', label: '撒嬌', icon: '🥺', low: '不屑', high: '奧斯卡等級' },
+  { id: 'smart', label: '聰明', icon: '🧠', low: '單純可愛', high: '會自己開門' },
+  { id: 'obedient', label: '聽話', icon: '🎓', low: '當你透明', high: '口令大師' },
+  { id: 'social', label: '社交', icon: '🐾', low: '怕生', high: '見人就撲' },
+  { id: 'brave', label: '膽子', icon: '🦁', low: '看到吸塵器就逃', high: '護家神獸' },
+  { id: 'greedy', label: '貪吃', icon: '🍖', low: '挑食', high: '四腳吸塵器' },
+  { id: 'lazy', label: '懶', icon: '🛋️', low: '過動', high: '一天睡 20 小時' },
+  { id: 'looks', label: '顏值', icon: '✨', low: '靈魂系', high: '網美級' },
+  { id: 'status', label: '地位', icon: '👑', low: '寵物', high: '真正的一家之主' },
+  { id: 'naughty', label: '搗蛋', icon: '😈', low: '模範生', high: '拆家大隊長', negative: true },
+  { id: 'loud', label: '音量', icon: '📢', low: '安靜', high: '鄰居報警', negative: true },
+  { id: 'shedding', label: '掉毛', icon: '🧹', low: '不掉毛', high: '毛毛雪', negative: true },
+  { id: 'vet', label: '看醫生', icon: '🏥', low: '健康寶寶', high: '獸醫 VIP', negative: true },
+]
+export const PET_RANKS = [
+  [90, 'S', '鎮宅神獸'],
+  [75, 'A', '家族團寵'],
+  [60, 'B', '乖寶寶'],
+  [45, 'C', '一般寵物'],
+  [0, 'D', '還在調教'],
+]
 
 /** 世代標籤:-2 → 祖輩、-1 → 父輩、0 → 同輩、1 → 子輩、2 → 孫輩 */
 export function generationLabel(g) {

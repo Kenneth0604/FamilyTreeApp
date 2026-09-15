@@ -9,6 +9,8 @@ import Tree from './pages/Tree.jsx'
 import People from './pages/People.jsx'
 import PersonForm from './pages/PersonForm.jsx'
 import PersonDetail from './pages/PersonDetail.jsx'
+import PetForm from './pages/PetForm.jsx'
+import PetDetail from './pages/PetDetail.jsx'
 import Settings from './pages/Settings.jsx'
 
 export default function App() {
@@ -51,6 +53,9 @@ export default function App() {
         <Route path="people/new" element={canEdit ? <PersonForm /> : <Navigate to="/people" replace />} />
         <Route path="people/:id" element={<PersonDetail />} />
         <Route path="people/:id/edit" element={canEdit ? <PersonForm /> : <Navigate to="/people" replace />} />
+        <Route path="pets/new" element={canEdit ? <PetForm /> : <Navigate to="/people" replace />} />
+        <Route path="pets/:id" element={<PetDetail />} />
+        <Route path="pets/:id/edit" element={canEdit ? <PetForm /> : <Navigate to="/people" replace />} />
         <Route path="settings" element={<Settings />} />
         <Route path="*" element={<Navigate to="/" replace />} />
       </Route>

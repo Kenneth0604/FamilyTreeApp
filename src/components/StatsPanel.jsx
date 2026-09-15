@@ -144,7 +144,7 @@ export default function StatsPanel({ person }) {
   )
 }
 
-function StatBar({ stat, value }) {
+export function StatBar({ stat, value }) {
   return (
     <div className="flex items-center gap-2">
       <span className="w-6 text-center text-base leading-none">{stat.icon}</span>

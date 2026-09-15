@@ -2,8 +2,43 @@ import { useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { useStore } from '../lib/store.jsx'
 import PersonCard from '../components/PersonCard.jsx'
-import { generationLabel } from '../lib/format.js'
+import PetCard from '../components/PetCard.jsx'
+import { generationLabel, PET_SPECIES_BY_ID } from '../lib/format.js'
 import { compareAge } from '../lib/kinship/birth.js'
+
+/** 成員列表底下的寵物區 */
+function PetsSection({ q }) {
+  const { pets, canEdit, nameOf } = useStore()
+  const kw = q.trim().toLowerCase()
+  const list = pets
+    .filter((p) => !kw || p.name.toLowerCase().includes(kw) || (p.breed || '').toLowerCase().includes(kw) || (PET_SPECIES_BY_ID[p.species]?.label || '').includes(kw) || (p.owner_person_id && nameOf(p.owner_person_id).toLowerCase().includes(kw)))
+    .sort((a, b) => a.name.localeCompare(b.name, 'zh-Hant'))
+  if (pets.length === 0 && !canEdit) return null
+  return (
+    <section>
+      <h2 className="section-title">
+        🐾 寵物
+        <span className="text-xs font-normal text-muted">{pets.length} 隻</span>
+        {canEdit && (
+          <Link to="/pets/new" className="ml-auto text-sm font-normal text-primary">
+            ＋ 新增寵物
+          </Link>
+        )}
+      </h2>
+      {pets.length === 0 ? (
+        <p className="empty">還沒有寵物。家裡的毛小孩、魚、龜、鳥都可以記上來,還能幫牠評分。</p>
+      ) : list.length === 0 ? (
+        <p className="empty">沒有符合「{q}」的寵物</p>
+      ) : (
+        <div className="space-y-2">
+          {list.map((p) => (
+            <PetCard key={p.id} pet={p} />
+          ))}
+        </div>
+      )}
+    </section>
+  )
+}
 
 export default function People() {
   const { people, termFor, viewpointId, selfId, canEdit } = useStore()
@@ -63,13 +98,14 @@ export default function People() {
             <p className="mt-1">這個家族還沒有任何成員。</p>
           )}
         </div>
+        <PetsSection q="" />
       </div>
     )
   }
 
   return (
     <div className="space-y-4">
-      <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="搜尋姓名、小名、標籤或稱謂…" className="input" />
+      <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="搜尋姓名、小名、標籤、稱謂或寵物…" className="input" />
 
       {!viewpointId && (
         <Link to="/settings" className="block rounded-2xl bg-info-soft px-4 py-3 text-sm text-info">
@@ -78,7 +114,7 @@ export default function People() {
       )}
       {viewpointId && needsBirthday && <p className="rounded-2xl bg-warning-soft px-4 py-2 text-xs text-warning">有些成員缺少生日,無法判斷長幼(標示「?」)。填寫生日可讓稱謂更精確。</p>}
 
-      {groups.length === 0 && <p className="empty">沒有符合「{q}」的成員</p>}
+      {groups.length === 0 && q && <p className="empty">沒有符合「{q}」的成員</p>}
 
       {groups.map((g) => (
         <section key={g.key}>
@@ -93,6 +129,8 @@ export default function People() {
           </div>
         </section>
       ))}
+
+      <PetsSection q={q} />
     </div>
   )
 }
