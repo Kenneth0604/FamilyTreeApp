@@ -94,6 +94,7 @@ export default function FamilyGate() {
               <div>
                 <p className="font-semibold text-ink">
                   {m.families?.name || '家族'}
+                  {m.families?.kind === 'merged' && <span className="ml-1.5 rounded-full bg-accent-soft px-2 py-0.5 text-xs font-normal text-accent">合併</span>}
                   {m.role === 'viewer' && <span className="ml-1.5 rounded-full bg-surface-2 px-2 py-0.5 text-xs font-normal text-muted">只能查看</span>}
                 </p>
                 <p className="text-xs text-muted">我在這裡叫「{m.display_name}」</p>

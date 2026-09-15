@@ -4,10 +4,11 @@ import { useStore, authEmailToUsername } from '../lib/store.jsx'
 import { useTheme, THEMES } from '../lib/theme.jsx'
 import { useToast } from '../lib/toast.jsx'
 import PersonPicker from '../components/PersonPicker.jsx'
+import MergeSection from '../components/MergeSection.jsx'
 
 export default function Settings() {
   const store = useStore()
-  const { family, codes, member, canEdit, memberships, people, viewpointId, selfId, advanced, authUser, logout } = store
+  const { family, codes, member, canEdit, isMerged, memberships, people, viewpointId, selfId, advanced, authUser, logout } = store
   const { theme, setTheme } = useTheme()
   const toast = useToast()
   const navigate = useNavigate()
@@ -93,8 +94,11 @@ export default function Settings() {
         </label>
       </section>
 
+      {/* 合併家族樹:合併樹顯示來源與解除;一般家族顯示產生 / 使用連結碼(editor 才有) */}
+      {(isMerged || canEdit) && <MergeSection />}
+
       {/* 邀請 */}
-      {canEdit ? (
+      {isMerged ? null : canEdit ? (
         <section>
           <h2 className="section-title">邀請家人加入</h2>
           <p className="mb-2 text-xs text-muted">兩種邀請碼都在同一個「輸入邀請碼」頁輸入,身分由碼決定。</p>
@@ -188,6 +192,7 @@ export default function Settings() {
         </div>
       </section>
 
+      {!isMerged && (
       <section>
         <button
           onClick={() =>
@@ -203,6 +208,7 @@ export default function Settings() {
           離開這個家族
         </button>
       </section>
+      )}
 
       <p className="text-center text-xs text-muted">家族樹 v{__APP_VERSION__}</p>
     </div>

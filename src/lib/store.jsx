@@ -1,6 +1,7 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react'
 import { supabase, isConfigured } from './supabase.js'
 import { buildGraph, computeAllRelationTerms } from './kinship/index.js'
+import { bridgeRows } from './merge.js'
 import { useToast } from './toast.jsx'
 
 /**
@@ -245,6 +246,7 @@ export function StoreProvider({ children }) {
   const [entries, setEntries] = useState([]) // 生平紀事(整個家族一次載入)
   const [pets, setPets] = useState([])
   const [households, setHouseholds] = useState([])
+  const [linkInvites, setLinkInvites] = useState([]) // 本家族尚未使用的合併連結碼(只有 editor 拿得到)
   const [ready, setReady] = useState(false)
   const [fatal, setFatal] = useState('')
   const [offline, setOffline] = useState(typeof navigator !== 'undefined' && navigator.onLine === false)
@@ -268,23 +270,54 @@ export function StoreProvider({ children }) {
     if (outboxRef.current.length > 0) return // 還有未同步的變更:不覆蓋本機狀態,flush 完成後會再抓
     setSyncing(true)
     try {
-      const [fam, mem, ppl, pc, sp, en, pt, hh, cd] = await Promise.all([
-        supabase.from('families').select('*').eq('id', familyId).maybeSingle(),
-        supabase.from('family_members').select('*').eq('family_id', familyId).order('joined_at'),
-        supabase.from('people').select('*').eq('family_id', familyId).order('created_at'),
-        supabase.from('parent_child').select('*').eq('family_id', familyId),
-        supabase.from('spouses').select('*').eq('family_id', familyId),
-        supabase.from('person_entries').select('*').eq('family_id', familyId).order('created_at'),
-        supabase.from('pets').select('*').eq('family_id', familyId).order('created_at'),
-        supabase.from('households').select('*').eq('family_id', familyId).order('created_at'),
-        // viewer 被 RLS 擋掉會拿到 null(不是錯誤)
-        supabase.from('family_codes').select('*').eq('family_id', familyId).maybeSingle(),
-      ])
-      for (const r of [fam, mem, ppl, pc, sp, en, pt, hh]) throwIf(r.error)
+      const fam = await supabase.from('families').select('*').eq('id', familyId).maybeSingle()
+      throwIf(fam.error)
+      let snap
+      let codesData = null
+      let invites = []
+      if (fam.data?.kind === 'merged') {
+        // 合併家族樹:自己底下沒有資料列,由 get_merged_tree 一次拼好兩個來源家族的資料;橋接關係轉成一般的關係列讓 buildGraph 接起來
+        const [mem, tree] = await Promise.all([
+          supabase.from('family_members').select('*').eq('family_id', familyId).order('joined_at'),
+          supabase.rpc('get_merged_tree', { p_merged_family_id: familyId }),
+        ])
+        throwIf(mem.error)
+        throwIf(tree.error)
+        const t = tree.data || {}
+        const bridges = bridgeRows(t.links ?? [], familyId)
+        snap = {
+          family: { ...fam.data, sources: t.source_families ?? [] },
+          members: mem.data ?? [],
+          people: t.people ?? [],
+          parentChild: [...(t.parent_child ?? []), ...bridges.parentChild],
+          spouses: [...(t.spouses ?? []), ...bridges.spouses],
+          entries: t.entries ?? [],
+          pets: t.pets ?? [],
+          households: t.households ?? [],
+          at: Date.now(),
+        }
+      } else {
+        const [mem, ppl, pc, sp, en, pt, hh, cd, li] = await Promise.all([
+          supabase.from('family_members').select('*').eq('family_id', familyId).order('joined_at'),
+          supabase.from('people').select('*').eq('family_id', familyId).order('created_at'),
+          supabase.from('parent_child').select('*').eq('family_id', familyId),
+          supabase.from('spouses').select('*').eq('family_id', familyId),
+          supabase.from('person_entries').select('*').eq('family_id', familyId).order('created_at'),
+          supabase.from('pets').select('*').eq('family_id', familyId).order('created_at'),
+          supabase.from('households').select('*').eq('family_id', familyId).order('created_at'),
+          // 以下兩個 viewer 會被 RLS 擋掉(拿到 null / 空陣列,不是錯誤)
+          supabase.from('family_codes').select('*').eq('family_id', familyId).maybeSingle(),
+          supabase.from('family_link_invites').select('*').eq('family_id', familyId).is('used_at', null).order('created_at'),
+        ])
+        for (const r of [mem, ppl, pc, sp, en, pt, hh]) throwIf(r.error)
+        snap = { family: fam.data, members: mem.data ?? [], people: ppl.data ?? [], parentChild: pc.data ?? [], spouses: sp.data ?? [], entries: en.data ?? [], pets: pt.data ?? [], households: hh.data ?? [], at: Date.now() }
+        codesData = cd.error ? null : cd.data
+        invites = li.error ? [] : (li.data ?? [])
+      }
       if (outboxRef.current.length > 0) return // 抓取期間又有新變更:以本機為準
-      const snap = { family: fam.data, members: mem.data ?? [], people: ppl.data ?? [], parentChild: pc.data ?? [], spouses: sp.data ?? [], entries: en.data ?? [], pets: pt.data ?? [], households: hh.data ?? [], at: Date.now() }
       applySnapshot(snap)
-      setCodes(cd.error ? null : cd.data)
+      setCodes(codesData)
+      setLinkInvites(invites)
       writeJSON(cacheKey(familyId), snap)
       setOffline(false)
       setFatal('')
@@ -416,6 +449,21 @@ export function StoreProvider({ children }) {
     }
   }, [authUser, familyId, attempt, refresh, flush, scheduleRefresh, applySnapshot, setOutbox, toast])
 
+  // 合併家族樹:資料在兩個來源家族底下,額外訂閱它們的變更。
+  // Realtime 會用訂閱者自己的 RLS 過濾,所以只收得到「自己也是成員的那個來源」的即時更新;另一邊靠 60 秒輪詢 / 回到前景重抓
+  const sourceKey = family?.kind === 'merged' && family?.id === familyId ? (family.sources ?? []).map((s) => s.id).sort().join(',') : ''
+  useEffect(() => {
+    if (!sourceKey) return
+    const channel = supabase.channel(`familytree-sources-${familyId}`)
+    for (const sid of sourceKey.split(',')) {
+      for (const table of ['people', 'parent_child', 'spouses', 'person_entries', 'pets', 'households']) {
+        channel.on('postgres_changes', { event: '*', schema: 'public', table, filter: `family_id=eq.${sid}` }, scheduleRefresh)
+      }
+    }
+    channel.subscribe()
+    return () => supabase.removeChannel(channel)
+  }, [sourceKey, familyId, scheduleRefresh])
+
   // 本機變更(含尚未同步的)也寫進快取,離線時關掉再開不會看到舊資料;family.id 對不上代表還是上一個家族的資料
   useEffect(() => {
     if (!ready || !familyId || family?.id !== familyId) return
@@ -441,6 +489,7 @@ export function StoreProvider({ children }) {
   }, [member, peopleById, selfId])
   const advanced = Boolean(member?.advanced_terms)
   const canEdit = member?.role !== 'viewer'
+  const isMerged = family?.kind === 'merged'
 
   const terms = useMemo(
     () => (viewpointId ? computeAllRelationTerms(viewpointId, graph, { advanced }) : new Map()),
@@ -616,6 +665,57 @@ export function StoreProvider({ children }) {
     [mutate],
   )
 
+  // ---------- 合併家族樹(全部是需要伺服器回應的 RPC,線上操作) ----------
+  const createLinkCode = useCallback(
+    ({ personId, relation, status = null, isParent = null }) =>
+      run(async () => {
+        const { data, error } = await supabase.rpc('create_family_link_code', { p_family_id: familyId, p_person_id: personId, p_relation: relation, p_status: status, p_is_parent: isParent })
+        throwIf(error)
+        return data
+      }),
+    [run, familyId],
+  )
+
+  const revokeLinkCode = useCallback(
+    (code) =>
+      run(async () => {
+        const { error } = await supabase.rpc('revoke_family_link_code', { p_code: code })
+        throwIf(error)
+        setLinkInvites((list) => list.filter((i) => i.code !== code))
+      }),
+    [run],
+  )
+
+  const peekLinkCode = useCallback(async (code) => {
+    const { data, error } = await supabase.rpc('peek_family_link_code', { p_code: code })
+    if (error) throw new Error(friendlyError(error))
+    return data
+  }, [])
+
+  const mergeWithCode = useCallback(
+    async (code, personId, mergedName) => {
+      const { data, error } = await supabase.rpc('merge_family_with_code', { p_code: code, p_family_id: familyId, p_person_id: personId, p_merged_name: mergedName || null })
+      if (error) throw new Error(friendlyError(error))
+      const list = await loadMemberships()
+      setMemberships(list)
+      switchFamily(data)
+      return data
+    },
+    [familyId, loadMemberships, switchFamily],
+  )
+
+  const removeMerge = useCallback(async () => {
+    const sources = family?.sources ?? []
+    const { error } = await supabase.rpc('remove_family_merge', { p_merged_family_id: familyId })
+    if (error) throw new Error(friendlyError(error))
+    writeJSON(cacheKey(familyId), null)
+    const list = await loadMemberships()
+    setMemberships(list)
+    // 切回自己有身分的那個來源家族
+    const back = sources.find((s) => list.some((m) => m.family_id === s.id))?.id ?? list[0]?.family_id ?? null
+    switchFamily(back)
+  }, [familyId, family, loadMemberships, switchFamily])
+
   const updateMember = useCallback(
     async (patch) => {
       if (!member) throw new Error('尚未載入成員資料')
@@ -678,7 +778,8 @@ export function StoreProvider({ children }) {
       configured: isConfigured,
       authLoading, authUser, login, signup, logout,
       memberships, membershipsError, retryMemberships: () => setMembershipAttempt((n) => n + 1),
-      familyId, family, codes, member, members, canEdit, switchFamily, createFamily, joinFamily, leaveFamily, renameFamily, regenerateInvite, regenerateViewCode,
+      familyId, family, codes, member, members, canEdit, isMerged, switchFamily, createFamily, joinFamily, leaveFamily, renameFamily, regenerateInvite, regenerateViewCode,
+      linkInvites, createLinkCode, revokeLinkCode, peekLinkCode, mergeWithCode, removeMerge,
       people, parentChild, spouses, entries, pets, households, graph, peopleById, nameOf, memberName,
       ready, fatal, retry, refresh, offline, syncing, pending: outbox.length, sync: flush,
       viewpointId, selfId, advanced, terms, termFor,
@@ -688,7 +789,8 @@ export function StoreProvider({ children }) {
       toast,
     }),
     [
-      authLoading, authUser, login, signup, logout, memberships, membershipsError, familyId, family, codes, member, members, canEdit,
+      authLoading, authUser, login, signup, logout, memberships, membershipsError, familyId, family, codes, member, members, canEdit, isMerged,
+      linkInvites, createLinkCode, revokeLinkCode, peekLinkCode, mergeWithCode, removeMerge,
       switchFamily, createFamily, joinFamily, leaveFamily, renameFamily, regenerateInvite, regenerateViewCode, people, parentChild, spouses, entries,
       graph, peopleById, nameOf, memberName, ready, fatal, retry, refresh, offline, syncing, outbox.length, flush, viewpointId, selfId, advanced,
       terms, termFor, addPerson, updatePerson, deletePerson, addParentChild, removeParentChild, addSpouse, updateSpouse,

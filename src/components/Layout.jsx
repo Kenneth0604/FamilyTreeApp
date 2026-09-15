@@ -25,7 +25,7 @@ export default function Layout() {
           <div className="min-w-0">
             <h1 className="flex items-center gap-1.5 truncate text-lg font-bold tracking-wide">
               <span className="truncate">{family?.name || '家族樹'}</span>
-              {!canEdit && <span className="shrink-0 rounded-full bg-white/20 px-2 py-0.5 text-[11px] font-medium">只能查看</span>}
+              {!canEdit && <span className="shrink-0 rounded-full bg-white/20 px-2 py-0.5 text-[11px] font-medium">{family?.kind === 'merged' ? '合併樹 · 只能查看' : '只能查看'}</span>}
             </h1>
             <p className="truncate text-[11px] text-white/80">
               {viewpointId ? `視角:${nameOf(viewpointId)}` : people.length ? '尚未設定視角(到設定選「我是誰」)' : '從新增第一位成員開始'}

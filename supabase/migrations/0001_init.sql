@@ -10,6 +10,7 @@
 --   person_entries  生平紀事:每人多筆履歷式條列(職業 / 學歷 / 事蹟 / 健康疾病 / 居住地 / 榮譽 / 其他),含起迄時間
 --   pets            寵物(名字、品種、主人、評分)
 --   households      小家庭:一群人的 id 陣列 + 名稱 / 顏色,樹狀圖用虛線圈起來
+--   families.kind   normal / merged;合併家族樹見檔案後半「合併家族樹」段(family_merge_sources / family_links / family_link_invites)
 --   parent_child    親子邊(有方向)
 --   spouses         配偶 / 伴侶邊(無方向;married / widowed / partner 未婚伴侶 / divorced / ex_partner 前伴侶)
 -- 兄弟姊妹、叔伯、堂表…全部由前端的稱謂引擎以最短路徑推算,不另外儲存。
@@ -355,6 +356,242 @@ begin
 end $$;
 grant execute on function public.regenerate_view_code(uuid) to authenticated;
 
+-- ============================================================================
+-- 合併家族樹
+-- 兩個獨立家族用「連結碼」把各自一個人連起來(配偶或親子),系統建立一個 kind = 'merged' 的新家族。
+-- 合併樹底下沒有任何 people / parent_child / spouses 資料列:讀取時由 get_merged_tree 把兩個來源家族的資料
+-- 加上橋接關係一次拼好回傳;兩邊所有成員都是合併樹的 viewer(唯讀),要編輯回原本的家族。
+-- 解除合併只刪掉合併樹這一列(cascade 清掉 family_merge_sources / family_links / 它的 family_members),
+-- 兩個來源家族完全不受影響。v1 不支援合併樹再被合併(巢狀)。
+-- 刻意不動 is_family_member / is_family_editor 與既有 RLS:跨家族讀取全部收斂在 get_merged_tree 這一個 security definer 函式。
+-- ============================================================================
+alter table public.families add column if not exists kind text not null default 'normal';
+alter table public.families drop constraint if exists families_kind_check;
+alter table public.families add constraint families_kind_check check (kind in ('normal', 'merged'));
+
+-- 一個合併家族由哪些來源家族組成(v1 固定兩個,結構保留多家族擴充空間)
+create table if not exists public.family_merge_sources (
+  merged_family_id  uuid not null references public.families(id) on delete cascade,
+  source_family_id  uuid not null references public.families(id) on delete cascade,
+  primary key (merged_family_id, source_family_id),
+  check (merged_family_id <> source_family_id)
+);
+-- 注意:來源家族整個被刪除時 cascade 只會刪掉這裡的一列,合併樹會剩單邊(app 目前沒有刪除家族的功能)
+
+-- 橋接關係:person_a 永遠是產生連結碼那一方的人,person_b 是輸入連結碼那一方的人
+create table if not exists public.family_links (
+  id                uuid primary key default gen_random_uuid(),
+  merged_family_id  uuid not null references public.families(id) on delete cascade,
+  person_a_id       uuid not null references public.people(id) on delete cascade,
+  person_b_id       uuid not null references public.people(id) on delete cascade,
+  relation          text not null check (relation in ('spouse', 'parent_child')),
+  status            text check (status is null or status in ('married', 'widowed', 'partner', 'divorced', 'ex_partner')), -- relation = spouse 時填
+  parent_side       text check (parent_side is null or parent_side in ('a', 'b')),                                         -- relation = parent_child 時填:誰是父母
+  created_by        uuid references public.family_members(id) on delete set null,
+  created_at        timestamptz not null default now(),
+  check (person_a_id <> person_b_id)
+);
+create index if not exists family_links_merged_idx on public.family_links(merged_family_id);
+
+-- 連結碼(一次性):記錄「我這邊哪個人、要建立什麼關係」,等對方輸入碼來合併
+create table if not exists public.family_link_invites (
+  code        text primary key,
+  family_id   uuid not null references public.families(id) on delete cascade,
+  person_id   uuid not null references public.people(id) on delete cascade,
+  relation    text not null check (relation in ('spouse', 'parent_child')),
+  status      text check (status is null or status in ('married', 'widowed', 'partner', 'divorced', 'ex_partner')),
+  is_parent   boolean, -- relation = parent_child 時填:true = 我提供的這個人是父母,false = 是小孩
+  created_by  uuid references public.family_members(id) on delete set null,
+  created_at  timestamptz not null default now(),
+  used_at     timestamptz -- null = 尚未使用;合併或撤銷後填上
+);
+create index if not exists family_link_invites_family_idx on public.family_link_invites(family_id);
+
+-- 連結碼不能跟任何邀請碼或其他連結碼撞號
+create or replace function public.gen_unique_link_code()
+returns text language plpgsql volatile security definer set search_path = public as $$
+declare
+  c text; -- 不叫 code:會跟 family_link_invites.code 欄位撞名(plpgsql 預設 variable_conflict = error)
+begin
+  loop
+    c := public.gen_invite_code();
+    exit when not exists (select 1 from public.family_codes where invite_code = c or view_code = c)
+         and not exists (select 1 from public.family_link_invites i where i.code = c);
+  end loop;
+  return c;
+end $$;
+revoke execute on function public.gen_unique_link_code() from anon, authenticated;
+
+create or replace function public.create_family_link_code(p_family_id uuid, p_person_id uuid, p_relation text, p_status text default null, p_is_parent boolean default null)
+returns text language plpgsql security definer set search_path = public as $$
+declare
+  new_code text;
+  mid      uuid;
+begin
+  if auth.uid() is null then raise exception '請先登入'; end if;
+  if not public.is_family_editor(p_family_id) then raise exception '只有可編輯的成員才能產生連結碼'; end if;
+  if (select kind from public.families where id = p_family_id) <> 'normal' then raise exception '合併家族樹不能再產生連結碼'; end if;
+  if not exists (select 1 from public.people where id = p_person_id and family_id = p_family_id) then raise exception '這個人不在你的家族裡'; end if;
+  if p_relation not in ('spouse', 'parent_child') then raise exception '關係類型錯誤'; end if;
+  if p_relation = 'spouse' and coalesce(p_status, '') not in ('married', 'widowed', 'partner', 'divorced', 'ex_partner') then raise exception '請選擇配偶關係狀態'; end if;
+  if p_relation = 'parent_child' and p_is_parent is null then raise exception '請指定這個人是父母還是小孩'; end if;
+  select id into mid from public.family_members where family_id = p_family_id and auth_user_id = auth.uid();
+  new_code := public.gen_unique_link_code();
+  insert into public.family_link_invites (code, family_id, person_id, relation, status, is_parent, created_by)
+    values (new_code, p_family_id, p_person_id, p_relation,
+            case when p_relation = 'spouse' then p_status end,
+            case when p_relation = 'parent_child' then p_is_parent end,
+            mid);
+  return new_code;
+end $$;
+grant execute on function public.create_family_link_code(uuid, uuid, text, text, boolean) to authenticated;
+
+-- 合併前先看看這個碼對面是誰、什麼關係(碼本身就是秘密,拿到碼的人看到一個名字是合理的)
+create or replace function public.peek_family_link_code(p_code text)
+returns jsonb language plpgsql stable security definer set search_path = public as $$
+declare
+  result jsonb;
+begin
+  if auth.uid() is null then raise exception '請先登入'; end if;
+  select jsonb_build_object('family_id', f.id, 'family_name', f.name, 'person_name', p.name, 'person_gender', p.gender,
+                            'relation', i.relation, 'status', i.status, 'is_parent', i.is_parent)
+    into result
+    from public.family_link_invites i
+    join public.families f on f.id = i.family_id
+    join public.people p on p.id = i.person_id
+   where i.code = upper(trim(p_code)) and i.used_at is null;
+  if result is null then raise exception '找不到這個連結碼或已經被使用過'; end if;
+  return result;
+end $$;
+grant execute on function public.peek_family_link_code(text) to authenticated;
+
+create or replace function public.merge_family_with_code(p_code text, p_family_id uuid, p_person_id uuid, p_merged_name text default null)
+returns uuid language plpgsql security definer set search_path = public as $$
+declare
+  inv        public.family_link_invites%rowtype;
+  other_name text;
+  my_name    text;
+  mid        uuid;
+  my_member  uuid;
+begin
+  if auth.uid() is null then raise exception '請先登入'; end if;
+  if not public.is_family_editor(p_family_id) then raise exception '只有可編輯的成員才能合併家族'; end if;
+  if (select kind from public.families where id = p_family_id) <> 'normal' then raise exception '合併家族樹不能再被合併'; end if;
+  if not exists (select 1 from public.people where id = p_person_id and family_id = p_family_id) then raise exception '這個人不在你的家族裡'; end if;
+
+  select * into inv from public.family_link_invites where code = upper(trim(p_code)) and used_at is null;
+  if inv.code is null then raise exception '找不到這個連結碼或已經被使用過'; end if;
+  if inv.family_id = p_family_id then raise exception '不能跟自己的家族合併'; end if;
+  if (select kind from public.families where id = inv.family_id) <> 'normal' then raise exception '對方的家族樹不能被合併'; end if;
+  if not exists (select 1 from public.people where id = inv.person_id and family_id = inv.family_id) then raise exception '對方指定的人已不在他們的家族裡'; end if;
+  if exists (
+    select 1 from public.family_merge_sources s1
+    join public.family_merge_sources s2 on s2.merged_family_id = s1.merged_family_id
+    where s1.source_family_id = inv.family_id and s2.source_family_id = p_family_id
+  ) then raise exception '這兩個家族已經合併過了'; end if;
+
+  select name into other_name from public.families where id = inv.family_id;
+  select name into my_name from public.families where id = p_family_id;
+  insert into public.families (name, kind)
+    values (coalesce(nullif(trim(p_merged_name), ''), other_name || ' × ' || my_name), 'merged')
+    returning id into mid;
+  insert into public.family_merge_sources (merged_family_id, source_family_id) values (mid, inv.family_id), (mid, p_family_id);
+
+  select id into my_member from public.family_members where family_id = p_family_id and auth_user_id = auth.uid();
+  insert into public.family_links (merged_family_id, person_a_id, person_b_id, relation, status, parent_side, created_by)
+    values (mid, inv.person_id, p_person_id, inv.relation, inv.status,
+            case when inv.relation = 'parent_child' then (case when inv.is_parent then 'a' else 'b' end) end,
+            my_member);
+
+  -- 兩邊目前所有成員都成為合併樹的 viewer(同時屬於兩家的人只會有一筆);viewpoint 留空讓他們在合併樹重選
+  insert into public.family_members (family_id, auth_user_id, display_name, role, self_person_id)
+    select mid, m.auth_user_id, m.display_name, 'viewer', m.self_person_id
+      from public.family_members m
+     where m.family_id in (inv.family_id, p_family_id)
+    on conflict (family_id, auth_user_id) do nothing;
+
+  update public.family_link_invites set used_at = now() where code = inv.code;
+  return mid;
+end $$;
+grant execute on function public.merge_family_with_code(text, uuid, uuid, text) to authenticated;
+
+create or replace function public.revoke_family_link_code(p_code text)
+returns void language plpgsql security definer set search_path = public as $$
+declare
+  fid uuid;
+begin
+  select family_id into fid from public.family_link_invites where code = upper(trim(p_code)) and used_at is null;
+  if fid is null then raise exception '找不到這個連結碼或已經被使用過'; end if;
+  if not public.is_family_editor(fid) then raise exception '只有可編輯的成員才能撤銷連結碼'; end if;
+  update public.family_link_invites set used_at = now() where code = upper(trim(p_code));
+end $$;
+grant execute on function public.revoke_family_link_code(text) to authenticated;
+
+create or replace function public.remove_family_merge(p_merged_family_id uuid)
+returns void language plpgsql security definer set search_path = public as $$
+begin
+  if auth.uid() is null then raise exception '請先登入'; end if;
+  if (select kind from public.families where id = p_merged_family_id) is distinct from 'merged' then raise exception '這不是合併家族樹'; end if;
+  if not exists (select 1 from public.family_merge_sources s where s.merged_family_id = p_merged_family_id and public.is_family_editor(s.source_family_id))
+    then raise exception '只有來源家族的可編輯成員才能解除合併'; end if;
+  delete from public.families where id = p_merged_family_id; -- cascade:merge_sources / links / 合併樹的 family_members
+end $$;
+grant execute on function public.remove_family_merge(uuid) to authenticated;
+
+-- 合併樹的全部資料一次拼好:兩個來源家族的人物 / 關係 / 紀事 / 寵物 / 小家庭 + 橋接關係。
+-- 唯一的跨家族讀取入口;只回傳 family_merge_sources 裡登記的來源。
+create or replace function public.get_merged_tree(p_merged_family_id uuid)
+returns jsonb language plpgsql stable security definer set search_path = public as $$
+declare
+  src uuid[];
+begin
+  if not public.is_family_member(p_merged_family_id) then raise exception '你不是這個家族的成員'; end if;
+  select array_agg(source_family_id) into src from public.family_merge_sources where merged_family_id = p_merged_family_id;
+  if src is null then raise exception '這不是合併家族樹'; end if;
+  return jsonb_build_object(
+    'source_families', coalesce((select jsonb_agg(jsonb_build_object('id', f.id, 'name', f.name) order by f.created_at) from public.families f where f.id = any(src)), '[]'::jsonb),
+    'people',          coalesce((select jsonb_agg(to_jsonb(x) order by x.created_at) from public.people x where x.family_id = any(src)), '[]'::jsonb),
+    'parent_child',    coalesce((select jsonb_agg(to_jsonb(x)) from public.parent_child x where x.family_id = any(src)), '[]'::jsonb),
+    'spouses',         coalesce((select jsonb_agg(to_jsonb(x)) from public.spouses x where x.family_id = any(src)), '[]'::jsonb),
+    'entries',         coalesce((select jsonb_agg(to_jsonb(x) order by x.created_at) from public.person_entries x where x.family_id = any(src)), '[]'::jsonb),
+    'pets',            coalesce((select jsonb_agg(to_jsonb(x) order by x.created_at) from public.pets x where x.family_id = any(src)), '[]'::jsonb),
+    'households',      coalesce((select jsonb_agg(to_jsonb(x) order by x.created_at) from public.households x where x.family_id = any(src)), '[]'::jsonb),
+    'links',           coalesce((select jsonb_agg(to_jsonb(x)) from public.family_links x where x.merged_family_id = p_merged_family_id), '[]'::jsonb)
+  );
+end $$;
+grant execute on function public.get_merged_tree(uuid) to authenticated;
+
+-- 合併之後才加入來源家族的人,也自動成為合併樹的 viewer。
+-- security definer:family_members 沒有 insert policy,trigger 以呼叫者身分執行會被 RLS 擋。
+-- 對合併樹自己那筆再觸發時,合併樹 id 不是任何來源 → 不會遞迴。
+create or replace function public.family_members_propagate_merge()
+returns trigger language plpgsql security definer set search_path = public as $$
+begin
+  insert into public.family_members (family_id, auth_user_id, display_name, role, self_person_id)
+    select s.merged_family_id, new.auth_user_id, new.display_name, 'viewer', new.self_person_id
+      from public.family_merge_sources s
+     where s.source_family_id = new.family_id
+    on conflict (family_id, auth_user_id) do nothing;
+  return new;
+end $$;
+drop trigger if exists family_members_propagate_merge on public.family_members;
+create trigger family_members_propagate_merge after insert on public.family_members
+  for each row execute function public.family_members_propagate_merge();
+
+alter table public.family_merge_sources enable row level security;
+alter table public.family_links         enable row level security;
+alter table public.family_link_invites  enable row level security;
+drop policy if exists "merge_sources member select" on public.family_merge_sources;
+create policy "merge_sources member select" on public.family_merge_sources for select to authenticated
+  using (public.is_family_member(source_family_id) or public.is_family_member(merged_family_id));
+drop policy if exists "family_links member select" on public.family_links;
+create policy "family_links member select" on public.family_links for select to authenticated
+  using (public.is_family_member(merged_family_id));
+drop policy if exists "link_invites editor select" on public.family_link_invites;
+create policy "link_invites editor select" on public.family_link_invites for select to authenticated
+  using (public.is_family_editor(family_id));
+-- 以上三張表的寫入一律經由 RPC
+
 -- ----------------------------------------------------------------------------
 -- Row Level Security
 -- ----------------------------------------------------------------------------
@@ -453,7 +690,7 @@ grant execute on function public.keep_alive(text) to anon, authenticated;
 do $$
 declare t text;
 begin
-  foreach t in array array['families', 'family_codes', 'family_members', 'people', 'parent_child', 'spouses', 'person_entries', 'pets', 'households'] loop
+  foreach t in array array['families', 'family_codes', 'family_members', 'people', 'parent_child', 'spouses', 'person_entries', 'pets', 'households', 'family_links', 'family_link_invites'] loop
     begin
       execute format('alter publication supabase_realtime add table public.%I', t);
     exception when duplicate_object then

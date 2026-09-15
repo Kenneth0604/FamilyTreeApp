@@ -22,6 +22,7 @@
 | 成員列表 | 搜尋姓名或稱謂,依世代分組,卡片顯示姓名、稱謂、年齡、大頭照 |
 | 新增 / 編輯 | 姓名、性別、生日(可只填年份)、是否過世、大頭照、備註;新增時選「跟樹上哪位成員是什麼關係」(父母 / 子女 / 配偶 / 兄弟姊妹)。選兄弟姊妹但對方沒有父母時,自動建立可稍後補資料的父 / 母佔位節點 |
 | 詳細頁 | 基本資料(姓名旁顯示多個小名、#自訂標籤、政治立場 藍 / 綠 / 白)、與視角的稱謂(含推算路徑)、管理父母 / 配偶・伴侶(已婚 / 未婚伴侶 / 離婚 / 前伴侶 / 喪偶)/ 子女關係、兄弟姊妹(自動推算) |
+| 合併家族樹 | 兩個家族各出一個人、指定關係(配偶 / 親子),透過 6 碼連結碼合併成一棵新的唯讀家族樹:A 家 editor 在設定頁選人 + 關係產生連結碼 → B 家 editor 輸入碼、預覽對方是誰、選自己這邊的人 → 建立 kind = merged 的新家族,兩邊所有成員(含之後加入的)都自動成為 viewer。合併樹沒有自己的資料,讀取時由 `get_merged_tree` RPC 把兩邊資料 + 橋接關係拼起來,在原家族編輯會同步反映;任一來源家族的 editor 可「解除合併」,只刪合併樹 |
 | 小家庭 | 把同住的人圈成一戶(名稱 + 顏色 + 成員),樹狀圖用該色虛線框起來;一個人可屬於多個小家庭。從樹狀圖的「⌂ 小家庭」進入管理 |
 | 顯示方式 | 樹狀圖右上「👁 顯示方式」:預設(大家一樣大)/ 家庭地位(戰力越高卡片越大)/ 讚讚人指數(指數越高越大)/ 政治立場(卡片頂端藍 / 綠 / 白色條)/ 自訂(挑幾項屬性,依平均分決定大小)。設定記在這台裝置 |
 | 戰力與讚讚人指數 | 戰力(家庭地位 0–10)+ 遊戲角色式屬性算出「讚讚人指數」:有趣 / 有病 / 脾氣 / 聰明 / 學歷 / 有錢 / 顏值 / 廚藝 / 酒量 / 愛唸 / 運氣 / 固執 / 八卦…共 30 項可挑,拉滑桿評 0–10 分,顯示數值條與低 / 高分描述,並算出綜合評分、等級(S–D)、稱號、最強 / 最弱屬性 |
@@ -91,6 +92,7 @@ npm test
 | `parent_child` | parent_id → child_id |
 | `spouses` | person_a_id、person_b_id、status(married / widowed / partner 未婚伴侶 / divorced / ex_partner 前伴侶);已結束的關係(divorced / ex_partner)稱謂推算不走、樹狀圖不並排,但仍可有共同子女 |
 | `households` | 小家庭:name、color、person_ids(uuid[]) |
+| `family_merge_sources` / `family_links` / `family_link_invites` | 合併家族樹:哪些來源家族組成、橋接關係(person_a 產生碼方、person_b 合併方;parent_side 標誰是父母)、一次性連結碼。寫入一律經由 `create_family_link_code` / `peek_family_link_code` / `merge_family_with_code` / `revoke_family_link_code` / `remove_family_merge` RPC;讀取合併樹用 `get_merged_tree`(security definer,唯一的跨家族讀取入口) |
 | `pets` | 寵物:owner_person_id(可 null)、name、species、breed、gender、birth_date、is_deceased、avatar_url、note、stats(jsonb) |
 | `person_entries` | 生平紀事:person_id、category(career / education / event / health / residence / award / other)、title、detail、start_date / end_date(同 birth_date 格式)、ongoing |
 
