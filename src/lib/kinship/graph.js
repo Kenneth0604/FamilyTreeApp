@@ -3,17 +3,22 @@
  *
  * 圖上只有兩種邊:
  *  - parent_child(有方向:parent → child)
- *  - spouse(無方向;status = married / divorced / widowed)
+ *  - spouse(無方向;status = married / widowed / partner(未婚伴侶)/ divorced / ex_partner(前伴侶))
  * 其他所有關係(兄弟姊妹、叔伯、堂表…)都靠最短路徑推算,不另外儲存。
  */
 
 /**
  * @typedef {{ id:string, name:string, gender:'male'|'female'|'unspecified', birth_date?:string|null, is_deceased?:boolean }} Person
  * @typedef {{ parent_id:string, child_id:string }} ParentChildRow
- * @typedef {{ person_a_id:string, person_b_id:string, status?:'married'|'divorced'|'widowed' }} SpouseRow
+ * @typedef {'married'|'widowed'|'partner'|'divorced'|'ex_partner'} SpouseStatus
+ * @typedef {{ person_a_id:string, person_b_id:string, status?:SpouseStatus }} SpouseRow
  * @typedef {{ persons: Map<string, Person>, parentsOf: Map<string, string[]>, childrenOf: Map<string, string[]>, spousesOf: Map<string, {id:string,status:string}[]> }} Graph
  * @typedef {{ type:'up'|'down'|'spouse', from:string, to:string }} Step
  */
+
+/** 已結束的關係(離婚 / 前伴侶):稱謂推算不走這條邊,排版也不把兩人並排 */
+export const ENDED_SPOUSE_STATUSES = new Set(['divorced', 'ex_partner'])
+export const isActiveSpouse = (status) => !ENDED_SPOUSE_STATUSES.has(status || 'married')
 
 /**
  * 把資料表列組成圖。找不到對應人物的邊會被忽略(資料不一致時不要崩潰)。
@@ -47,7 +52,7 @@ export function buildGraph({ people = [], parentChild = [], spouses = [] }) {
 }
 
 /**
- * 從 fromId 出發做 BFS(parent_child 邊雙向可走、spouse 邊可走但離婚的不走)。
+ * 從 fromId 出發做 BFS(parent_child 邊雙向可走、spouse 邊可走但已結束的(離婚 / 前伴侶)不走)。
  * 同一層若有多條等長路徑,優先選「經過 spouse 邊最少」的(純血緣優先)。
  * 因為每一層處理完才進下一層,同層節點的 prev 都已定案,所以只在同 dist 時比較 spouse 數即可。
  *
@@ -78,7 +83,7 @@ export function bfs(graph, fromId, { toId } = {}) {
       }
       for (const p of graph.parentsOf.get(id) || []) relax(p, 'up')
       for (const c of graph.childrenOf.get(id) || []) relax(c, 'down')
-      for (const s of graph.spousesOf.get(id) || []) if (s.status !== 'divorced') relax(s.id, 'spouse')
+      for (const s of graph.spousesOf.get(id) || []) if (isActiveSpouse(s.status)) relax(s.id, 'spouse')
     }
     if (toId && best.has(toId)) break
     frontier = next

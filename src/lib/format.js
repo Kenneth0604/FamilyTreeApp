@@ -1,7 +1,8 @@
 import { ageFromBirth, formatBirth } from './kinship/birth.js'
 
 export const GENDER_LABEL = { male: '男', female: '女', unspecified: '未指定' }
-export const SPOUSE_STATUS_LABEL = { married: '已婚', divorced: '離婚', widowed: '喪偶' }
+/** 配偶 / 伴侶關係狀態(顯示順序即此順序) */
+export const SPOUSE_STATUS_LABEL = { married: '已婚', partner: '伴侶(未婚)', divorced: '離婚', ex_partner: '前伴侶', widowed: '喪偶' }
 
 /** 「36 歲」「約 36 歲」「已故」;沒生日回空字串 */
 export function ageLabel(person) {
@@ -31,6 +32,7 @@ export const ENTRY_CATEGORIES = [
   { id: 'career', label: '職業經歷', icon: '💼', hint: '公司 / 職稱、創業、務農、從軍…' },
   { id: 'education', label: '學歷', icon: '🎓', hint: '學校、科系、師承' },
   { id: 'event', label: '重要事蹟', icon: '⭐', hint: '遷居來台、創辦事業、重大經歷、家族故事' },
+  { id: 'health', label: '健康 / 疾病', icon: '🩺', hint: '疾病、過敏、手術、慢性病、家族病史;可填發病或確診時間' },
   { id: 'residence', label: '居住地', icon: '🏠', hint: '曾住過的地方' },
   { id: 'award', label: '榮譽獎項', icon: '🏅', hint: '得獎、表揚、頭銜' },
   { id: 'other', label: '其他', icon: '📌', hint: '興趣、信仰、健康、任何想記下的事' },
@@ -58,14 +60,97 @@ export function compareEntries(a, b) {
   return (a.sort_order ?? 0) - (b.sort_order ?? 0) || String(a.created_at).localeCompare(String(b.created_at))
 }
 
-/** 把「小明、阿明, Ming」這種輸入切成不重複的小名陣列 */
-export function parseNicknames(text) {
+/** 把「小明、阿明, Ming」這種輸入切成不重複的陣列(小名、標籤共用) */
+export function parseList(text) {
   const out = []
   for (const raw of String(text || '').split(/[、,，;；\n]+/)) {
     const n = raw.trim()
     if (n && !out.includes(n)) out.push(n)
   }
   return out
+}
+export const parseNicknames = parseList
+
+/**
+ * 遊戲角色式屬性(0–10)。low / high 是低分 / 高分時的描述,越好笑越好
+ */
+export const STATS = [
+  { id: 'fun', label: '有趣', icon: '🎉', low: '無聊到睡著', high: '全場焦點' },
+  { id: 'crazy', label: '有病', icon: '🤪', low: '正常人', high: '病入膏肓' },
+  { id: 'temper', label: '脾氣', icon: '🌋', low: '佛系', high: '一秒爆炸' },
+  { id: 'smart', label: '聰明', icon: '🧠', low: '傻人有傻福', high: '人形電腦' },
+  { id: 'education', label: '學歷', icon: '🎓', low: '社會大學', high: '博士後' },
+  { id: 'rich', label: '有錢', icon: '💰', low: '月光族', high: '土豪' },
+  { id: 'looks', label: '顏值', icon: '✨', low: '靠氣質', high: '天選之人' },
+  { id: 'cooking', label: '廚藝', icon: '🍳', low: '黑暗料理', high: '總鋪師' },
+  { id: 'drinking', label: '酒量', icon: '🍺', low: '一杯倒', high: '千杯不醉' },
+  { id: 'nagging', label: '愛唸', icon: '🗣️', low: '惜字如金', high: '唸經大師' },
+  { id: 'luck', label: '運氣', icon: '🍀', low: '烏鴉嘴', high: '天選之子' },
+  { id: 'stubborn', label: '固執', icon: '🪨', low: '隨便都好', high: '撞牆也不轉彎' },
+  { id: 'gossip', label: '八卦', icon: '📡', low: '不知人間事', high: '家族情報局' },
+  { id: 'sleepy', label: '嗜睡', icon: '😴', low: '早起的鳥', high: '睡到自然醒' },
+  { id: 'generous', label: '大方', icon: '🧧', low: '紅包薄如紙', high: '紅包厚如磚' },
+  { id: 'tech', label: '科技力', icon: '📱', low: '長輩圖製造機', high: '3C 達人' },
+  { id: 'direction', label: '方向感', icon: '🧭', low: '出門就迷路', high: '人體 GPS' },
+  { id: 'singing', label: '歌喉', icon: '🎤', low: '五音不全', high: '麥霸' },
+  { id: 'lazy', label: '懶', icon: '🛋️', low: '勤勞小蜜蜂', high: '沙發長出來' },
+  { id: 'gaming', label: '電動', icon: '🎮', low: '不知 Switch 為何物', high: '電競選手' },
+  { id: 'foodie', label: '吃貨', icon: '🍜', low: '吃不下', high: '什麼都吃' },
+  { id: 'talkative', label: '話多', icon: '💬', low: '句點王', high: '停不下來' },
+  { id: 'cute', label: '可愛', icon: '🐣', low: '威嚴', high: '融化全場' },
+  { id: 'strength', label: '力氣', icon: '💪', low: '醬油瓶打不開', high: '徒手搬冰箱' },
+  { id: 'punctual', label: '準時', icon: '⏱️', low: '永遠遲到', high: '提早半小時' },
+  { id: 'fashion', label: '時尚', icon: '👗', low: '藍白拖', high: '走秀模特' },
+  { id: 'driving', label: '開車', icon: '🚗', low: '馬路三寶', high: '賽車手' },
+  { id: 'mahjong', label: '麻將', icon: '🀄', low: '桌邊觀眾', high: '牌神' },
+  { id: 'memory', label: '記性', icon: '🐟', low: '金魚腦', high: '過目不忘' },
+  { id: 'patience', label: '耐心', icon: '🧘', low: '三秒不耐', high: '高僧' },
+]
+export const STAT_BY_ID = Object.fromEntries(STATS.map((s) => [s.id, s]))
+
+/** 分數對應的描述:低 / 中 / 高 */
+export function statDescriptor(stat, value) {
+  if (value <= 3) return stat.low
+  if (value >= 8) return stat.high
+  return '普通'
+}
+
+/** 戰力(家庭地位)0–10:影響樹狀圖卡片大小 */
+export const POWER_DEFAULT = 5
+export const POWER_LEVELS = [
+  [10, '家族大魔王'],
+  [9, '話事人'],
+  [7, '有份量'],
+  [5, '一般成員'],
+  [3, '小咖'],
+  [0, '邊緣人'],
+]
+export function powerLabel(power) {
+  const p = Number.isFinite(power) ? power : POWER_DEFAULT
+  return POWER_LEVELS.find(([min]) => p >= min)[1]
+}
+/** 卡片縮放:0 → 0.8、5 → 1.0、10 → 1.2(最大不超過卡片間距,避免重疊) */
+export function powerScale(power) {
+  const p = Number.isFinite(power) ? power : POWER_DEFAULT
+  return 0.8 + p * 0.04
+}
+
+const RANKS = [
+  [90, 'S', '傳說級人物'],
+  [75, 'A', '主角級'],
+  [60, 'B', '重要配角'],
+  [45, 'C', '路人甲'],
+  [0, 'D', '新手村'],
+]
+
+/** 綜合評分:已評屬性的平均 × 10(0–100),附等級、稱號、最強 / 最弱屬性;沒評任何屬性回 null */
+export function overallRating(stats) {
+  const items = STATS.filter((s) => Number.isFinite(stats?.[s.id])).map((s) => ({ ...s, value: stats[s.id] }))
+  if (!items.length) return null
+  const score = Math.round((items.reduce((a, s) => a + s.value, 0) / items.length) * 10)
+  const [, rank, title] = RANKS.find(([min]) => score >= min)
+  const sorted = [...items].sort((a, b) => b.value - a.value)
+  return { score, rank, title, count: items.length, best: sorted[0], worst: sorted.length > 1 ? sorted[sorted.length - 1] : null }
 }
 
 /** 世代標籤:-2 → 祖輩、-1 → 父輩、0 → 同輩、1 → 子輩、2 → 孫輩 */

@@ -6,12 +6,13 @@ import AvatarUploader from '../components/AvatarUploader.jsx'
 import PersonPicker from '../components/PersonPicker.jsx'
 import Avatar from '../components/Avatar.jsx'
 import { parseBirth } from '../lib/kinship/birth.js'
-import { SPOUSE_STATUS_LABEL, parseNicknames, toPartialDate } from '../lib/format.js'
+import { isActiveSpouse } from '../lib/kinship/graph.js'
+import { SPOUSE_STATUS_LABEL, parseList, toPartialDate } from '../lib/format.js'
 
 const REL = [
   { id: 'parent', label: '父母', desc: '新成員是這個人的爸爸 / 媽媽' },
   { id: 'child', label: '子女', desc: '新成員是這個人的孩子' },
-  { id: 'spouse', label: '配偶', desc: '新成員是這個人的先生 / 太太' },
+  { id: 'spouse', label: '配偶 / 伴侶', desc: '新成員是這個人的先生 / 太太,或未婚伴侶、前任' },
   { id: 'sibling', label: '兄弟姊妹', desc: '新成員與這個人有相同的父母' },
 ]
 
@@ -28,6 +29,7 @@ export default function PersonForm() {
   // ----- 基本欄位 -----
   const [name, setName] = useState('')
   const [nicknames, setNicknames] = useState('')
+  const [tags, setTags] = useState('')
   const [gender, setGender] = useState('unspecified')
   const [year, setYear] = useState('')
   const [month, setMonth] = useState('')
@@ -48,6 +50,7 @@ export default function PersonForm() {
     if (editing) {
       setName(editing.name)
       setNicknames((editing.nicknames || []).join('、'))
+      setTags((editing.tags || []).join('、'))
       setGender(editing.gender)
       const b = parseBirth(editing.birth_date)
       setYear(b ? String(b.y) : '')
@@ -67,7 +70,7 @@ export default function PersonForm() {
   const anchor = anchorId ? peopleById.get(anchorId) : null
   const anchorParents = useMemo(() => (anchorId ? graph.parentsOf.get(anchorId) || [] : []), [graph, anchorId])
   const anchorSpouses = useMemo(
-    () => (anchorId ? (graph.spousesOf.get(anchorId) || []).filter((s) => s.status !== 'divorced').map((s) => s.id) : []),
+    () => (anchorId ? (graph.spousesOf.get(anchorId) || []).filter((s) => isActiveSpouse(s.status)).map((s) => s.id) : []),
     [graph, anchorId],
   )
   useEffect(() => {
@@ -88,7 +91,8 @@ export default function PersonForm() {
 
     const fields = {
       name: name.trim(),
-      nicknames: parseNicknames(nicknames),
+      nicknames: parseList(nicknames),
+      tags: parseList(tags),
       gender,
       birth_date: toPartialDate(year, month, day),
       is_deceased: deceased,
@@ -176,14 +180,15 @@ export default function PersonForm() {
 
           {relType === 'spouse' && (
             <div>
-              <label className="label">婚姻狀態</label>
-              <div className="flex gap-1.5">
+              <label className="label">關係狀態</label>
+              <div className="flex flex-wrap gap-1.5">
                 {Object.entries(SPOUSE_STATUS_LABEL).map(([k, v]) => (
                   <button key={k} type="button" onClick={() => setSpouseStatus(k)} className={`chip ${spouseStatus === k ? 'chip-active' : ''}`}>
                     {v}
                   </button>
                 ))}
               </div>
+              <p className="mt-1 text-xs text-muted">離婚 / 前伴侶在樹狀圖上會用不同線型標示,也可以有共同的孩子。</p>
             </div>
           )}
 
@@ -238,6 +243,11 @@ export default function PersonForm() {
           <label className="label">小名 / 別名(可多個)</label>
           <input value={nicknames} onChange={(e) => setNicknames(e.target.value)} className="input" placeholder="例如:阿明、小明、Ming" />
           <p className="mt-1 text-xs text-muted">用「、」或逗號分隔,會顯示在姓名旁邊,搜尋成員時也找得到。</p>
+        </div>
+        <div>
+          <label className="label">標籤(可多個)</label>
+          <input value={tags} onChange={(e) => setTags(e.target.value)} className="input" placeholder="例如:ADHD、左撇子、素食" />
+          <p className="mt-1 text-xs text-muted">自由輸入,用「、」或逗號分隔。會以 #標籤 顯示在詳細頁,搜尋時也找得到。</p>
         </div>
         <div>
           <label className="label">性別</label>

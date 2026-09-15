@@ -6,10 +6,10 @@
 --   families        家族群組
 --   family_codes    每個家族兩種邀請碼:invite_code 加入後可編輯、view_code 加入後只能查看(只有 editor 讀得到)
 --   family_members  「某個登入帳號在某個家族中的身分」(role editor / viewer、self / viewpoint / 進階模式)
---   people          家族樹上的每一個人(大多數沒有帳號;nicknames 為多個小名)
---   person_entries  生平紀事:每人多筆履歷式條列(職業 / 學歷 / 事蹟 / 居住地 / 榮譽 / 其他),含起迄時間
+--   people          家族樹上的每一個人(大多數沒有帳號;nicknames 小名、tags 自訂標籤、stats 遊戲式屬性分數、power 戰力 / 家庭地位)
+--   person_entries  生平紀事:每人多筆履歷式條列(職業 / 學歷 / 事蹟 / 健康疾病 / 居住地 / 榮譽 / 其他),含起迄時間
 --   parent_child    親子邊(有方向)
---   spouses         配偶邊(無方向;married / divorced / widowed)
+--   spouses         配偶 / 伴侶邊(無方向;married / widowed / partner 未婚伴侶 / divorced / ex_partner 前伴侶)
 -- 兄弟姊妹、叔伯、堂表…全部由前端的稱謂引擎以最短路徑推算,不另外儲存。
 --
 -- RLS:所有表都以「family_id 是否在該使用者所屬的 family_members 中」判斷讀取;寫入另需 role = editor。
@@ -91,26 +91,35 @@ create table if not exists public.spouses (
   family_id    uuid not null references public.families(id) on delete cascade,
   person_a_id  uuid not null references public.people(id) on delete cascade,
   person_b_id  uuid not null references public.people(id) on delete cascade,
-  status       text not null default 'married' check (status in ('married', 'divorced', 'widowed')),
+  status       text not null default 'married' check (status in ('married', 'widowed', 'partner', 'divorced', 'ex_partner')),
   created_by   uuid references public.family_members(id) on delete set null,
   updated_by   uuid references public.family_members(id) on delete set null,
   created_at   timestamptz not null default now(),
   updated_at   timestamptz not null default now(),
   check (person_a_id <> person_b_id)
 );
+-- 既有資料庫補上新的關係狀態(partner 未婚伴侶 / ex_partner 前伴侶)
+alter table public.spouses drop constraint if exists spouses_status_check;
+alter table public.spouses add constraint spouses_status_check check (status in ('married', 'widowed', 'partner', 'divorced', 'ex_partner'));
 -- 同一對人只能有一筆配偶紀錄(不論 a / b 順序)
 create unique index if not exists spouses_pair_unique
   on public.spouses (least(person_a_id, person_b_id), greatest(person_a_id, person_b_id));
 
 -- 小名 / 別名(可多個),顯示在姓名旁
 alter table public.people add column if not exists nicknames text[] not null default '{}';
+-- 自訂標籤(例如 ADHD、左撇子)
+alter table public.people add column if not exists tags text[] not null default '{}';
+-- 遊戲角色式屬性:{ 屬性 id: 0..10 },沒評的不放
+alter table public.people add column if not exists stats jsonb not null default '{}'::jsonb;
+-- 戰力(家庭地位)0..10,預設 5;數字越大樹狀圖卡片越大
+alter table public.people add column if not exists power smallint not null default 5 check (power between 0 and 10);
 
 -- 生平紀事:履歷式條列。每人依類別(職業 / 學歷 / 事蹟 / 居住地 / 榮譽 / 其他)列出多筆,每筆可填起迄時間
 create table if not exists public.person_entries (
   id          uuid primary key default gen_random_uuid(),
   family_id   uuid not null references public.families(id) on delete cascade,
   person_id   uuid not null references public.people(id) on delete cascade,
-  category    text not null check (category in ('career', 'education', 'event', 'residence', 'award', 'other')),
+  category    text not null check (category in ('career', 'education', 'event', 'health', 'residence', 'award', 'other')),
   title       text not null check (length(trim(title)) > 0),
   detail      text not null default '',
   -- 與 birth_date 相同:'YYYY' / 'YYYY-MM' / 'YYYY-MM-DD' 或 null
@@ -123,6 +132,9 @@ create table if not exists public.person_entries (
   created_at  timestamptz not null default now(),
   updated_at  timestamptz not null default now()
 );
+-- 既有資料庫補上新的類別(health 健康 / 疾病)
+alter table public.person_entries drop constraint if exists person_entries_category_check;
+alter table public.person_entries add constraint person_entries_category_check check (category in ('career', 'education', 'event', 'health', 'residence', 'award', 'other'));
 create index if not exists person_entries_family_idx on public.person_entries(family_id);
 create index if not exists person_entries_person_idx on public.person_entries(person_id);
 

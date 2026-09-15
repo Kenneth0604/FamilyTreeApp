@@ -16,6 +16,7 @@ export default function People() {
         !kw ||
         p.name.toLowerCase().includes(kw) ||
         (p.nicknames || []).some((n) => n.toLowerCase().includes(kw)) ||
+        (p.tags || []).some((t) => t.toLowerCase().includes(kw)) ||
         (termFor(p.id)?.term || '').includes(kw) ||
         (p.note || '').toLowerCase().includes(kw),
     )
@@ -68,7 +69,7 @@ export default function People() {
 
   return (
     <div className="space-y-4">
-      <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="搜尋姓名、小名或稱謂…" className="input" />
+      <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="搜尋姓名、小名、標籤或稱謂…" className="input" />
 
       {!viewpointId && (
         <Link to="/settings" className="block rounded-2xl bg-info-soft px-4 py-3 text-sm text-info">

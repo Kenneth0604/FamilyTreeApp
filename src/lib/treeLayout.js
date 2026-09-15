@@ -8,9 +8,10 @@
  * 不引入圖形排版庫,足以應付一般家族(數十到百餘人)。
  */
 import { compareAge } from './kinship/birth.js'
+import { isActiveSpouse } from './kinship/graph.js'
 
 export const NODE_W = 132
-export const NODE_H = 168
+export const NODE_H = 182
 const GAP_X = 28
 const GAP_Y = 90
 const COUPLE_GAP = 12
@@ -45,7 +46,7 @@ export function layoutTree(graph, terms, viewpointId) {
 
   // ---- 2. 每層排序 ----
   const order = new Map() // id → x index(浮點)
-  const spouseOf = (id) => (graph.spousesOf.get(id) || []).filter((s) => s.status !== 'divorced').map((s) => s.id)
+  const spouseOf = (id) => (graph.spousesOf.get(id) || []).filter((s) => isActiveSpouse(s.status)).map((s) => s.id)
   const byBirth = (a, b) => -compareAge(graph.persons.get(a), graph.persons.get(b)) || String(a).localeCompare(String(b))
 
   for (const g of rowKeys) {

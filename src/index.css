@@ -165,7 +165,14 @@ input[type="date"], input[type="number"] {
 .react-flow__edge-path { stroke: var(--t-muted); stroke-width: 1.6; }
 .react-flow__edge.spouse-edge .react-flow__edge-path { stroke: var(--t-primary); stroke-dasharray: 4 3; }
 .react-flow__edge.divorced-edge .react-flow__edge-path { stroke: var(--t-line); stroke-dasharray: 2 4; }
+.react-flow__edge.partner-edge .react-flow__edge-path { stroke: var(--t-accent); stroke-dasharray: 1.5 3; }
+.react-flow__edge.ex-partner-edge .react-flow__edge-path { stroke: var(--t-accent); stroke-dasharray: 1.5 6; opacity: 0.6; }
+.react-flow__edge-text { font-size: 10px; fill: var(--t-muted); }
+.react-flow__edge-textbg { fill: var(--t-bg); }
 .tree-canvas { touch-action: none; }
+/* 長按後拖曳中的卡片 */
+.react-flow__node.person-dragging { z-index: 20 !important; }
+.react-flow__node.person-dragging > .card { transform: scale(1.04); box-shadow: 0 12px 28px -8px rgb(0 0 0 / 0.35); }
 
 @layer components {
   .card { @apply rounded-2xl bg-surface shadow-sm ring-1 ring-line; }

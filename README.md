@@ -18,11 +18,12 @@
 | --- | --- |
 | 帳號 | 帳號 + 密碼(Supabase Auth)。首次登入建立新家族,或輸入 6 碼邀請碼(或點連結)加入;一個帳號可加入多個家族並隨時切換 |
 | 家族群組 | 一個家族樹屬於一個 family,每個家族有兩種邀請碼:**可編輯**的邀請碼加入後可共同新增、編輯;**只能查看**的邀請碼加入後只能瀏覽(RLS 強制)。兩種碼都在同一個輸入框輸入,身分由碼決定。每筆資料記錄 created_by / updated_by,詳細頁顯示「最後由誰編輯」 |
-| 樹狀圖 | 以視角為中心、依世代分層(配偶並排、子女在下一層),節點顯示大頭照 / 姓名 / 稱謂,點節點看詳細 |
+| 樹狀圖 | 以視角為中心、依世代分層(配偶並排、子女在下一層);同一對父母先匯合到一個連接點再以直角線分岔到各孩子。卡片顯示大頭照 / 姓名(小名)/ 稱謂,大小隨「戰力」縮放;未婚伴侶、離婚、前伴侶用不同線型並標字。長按卡片可拖曳調整位置(記在這台裝置,可一鍵重新排版),點卡片看詳細 |
 | 成員列表 | 搜尋姓名或稱謂,依世代分組,卡片顯示姓名、稱謂、年齡、大頭照 |
 | 新增 / 編輯 | 姓名、性別、生日(可只填年份)、是否過世、大頭照、備註;新增時選「跟樹上哪位成員是什麼關係」(父母 / 子女 / 配偶 / 兄弟姊妹)。選兄弟姊妹但對方沒有父母時,自動建立可稍後補資料的父 / 母佔位節點 |
-| 詳細頁 | 基本資料(姓名旁顯示多個小名)、與視角的稱謂(含推算路徑)、管理父母 / 配偶(含婚姻狀態)/ 子女關係、兄弟姊妹(自動推算) |
-| 生平紀事 | 履歷式條列:職業經歷 / 學歷 / 重要事蹟 / 居住地 / 榮譽獎項 / 其他,各區 1. 2. 3. 依時間排序;每筆有標題、起迄時間(可只填年份、可勾「至今」)與詳細說明 |
+| 詳細頁 | 基本資料(姓名旁顯示多個小名、#自訂標籤)、與視角的稱謂(含推算路徑)、管理父母 / 配偶・伴侶(已婚 / 未婚伴侶 / 離婚 / 前伴侶 / 喪偶)/ 子女關係、兄弟姊妹(自動推算) |
+| 戰力與屬性 | 戰力(家庭地位 0–10,決定樹狀圖卡片大小)+ 遊戲角色式屬性:有趣 / 有病 / 脾氣 / 聰明 / 學歷 / 有錢 / 顏值 / 廚藝 / 酒量 / 愛唸 / 運氣 / 固執 / 八卦…共 30 項可挑,拉滑桿評 0–10 分,顯示數值條與低 / 高分描述,並算出綜合評分、等級(S–D)、稱號、最強 / 最弱屬性 |
+| 生平紀事 | 履歷式條列:職業經歷 / 學歷 / 重要事蹟 / 健康・疾病 / 居住地 / 榮譽獎項 / 其他,各區 1. 2. 3. 依時間排序;每筆有標題、起迄時間(可只填年份、可勾「至今」)與詳細說明 |
 | 設定 | 切換視角(我是誰)、綁定帳號的真實身分、進階稱謂模式、兩種邀請碼管理(分享 / 重新產生,僅可編輯成員可見)、家族名稱、主題(粉粉 / 黑黑)、切換家族、離開家族 |
 | 即時同步 | Supabase Realtime + 60 秒輪詢 + 回到前景時重抓 |
 | 離線寫入 | 新增 / 修改 / 刪除先套用到本機並放進 outbox(localStorage),背景依序送到 Supabase;離線或連不上就保留、連線後自動重送;被伺服器拒絕(權限、重複關係)的變更會還原並提示。畫面上方顯示尚未同步的筆數,有未同步變更時不會提示重新載入新版本 |
@@ -83,10 +84,10 @@ npm test
 | --- | --- |
 | `families` | id, name, invite_code(唯一、可重新產生) |
 | `family_members` | 帳號 × 家族的身分:display_name、self_person_id、viewpoint_person_id、advanced_terms |
-| `people` | name、gender(male / female / unspecified)、birth_date(文字,`YYYY` / `YYYY-MM` / `YYYY-MM-DD` 或 null)、is_deceased、avatar_url、note、created_by / updated_by / updated_at |
+| `people` | name、nicknames(text[])、tags(text[])、gender(male / female / unspecified)、birth_date(文字,`YYYY` / `YYYY-MM` / `YYYY-MM-DD` 或 null)、is_deceased、avatar_url、note、stats(jsonb,{屬性 id: 0–10})、power(0–10 戰力)、created_by / updated_by / updated_at |
 | `parent_child` | parent_id → child_id |
 | `spouses` | person_a_id、person_b_id、status(married / widowed / partner 未婚伴侶 / divorced / ex_partner 前伴侶);已結束的關係(divorced / ex_partner)稱謂推算不走、樹狀圖不並排,但仍可有共同子女 |
-| `person_entries` | 生平紀事:person_id、category(career / education / event / residence / award / other)、title、detail、start_date / end_date(同 birth_date 格式)、ongoing |
+| `person_entries` | 生平紀事:person_id、category(career / education / event / health / residence / award / other)、title、detail、start_date / end_date(同 birth_date 格式)、ongoing |
 
 RLS:所有表以 `is_family_member(family_id)` 判斷讀取,寫入另需 `is_family_editor(family_id)`(`family_members.role = 'editor'`);兩種邀請碼放在獨立的 `family_codes` 表,RLS 只讓 editor 讀。建立家族 / 加入(`join_family` 依碼是 invite_code 或 view_code 給 editor / viewer)/ 重新產生兩種碼都透過 security definer 的 RPC。
 

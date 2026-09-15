@@ -20,6 +20,11 @@ export default function PersonCard({ person, term, isViewpoint, isSelf }) {
           {age && <span>{age}</span>}
           {birth && <span>{birth}</span>}
           {!age && !birth && <span className="text-muted/70">未填生日</span>}
+          {person.tags?.slice(0, 3).map((t) => (
+            <span key={t} className="text-accent">
+              #{t}
+            </span>
+          ))}
         </div>
         <div className="mt-1.5">
           <TermBadge result={term} />

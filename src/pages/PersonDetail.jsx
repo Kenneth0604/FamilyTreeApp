@@ -6,6 +6,7 @@ import Avatar from '../components/Avatar.jsx'
 import TermBadge from '../components/TermBadge.jsx'
 import PersonPicker from '../components/PersonPicker.jsx'
 import LifeEntries from '../components/LifeEntries.jsx'
+import StatsPanel from '../components/StatsPanel.jsx'
 import { ageLabel, birthLabel, GENDER_LABEL, SPOUSE_STATUS_LABEL, relativeTime } from '../lib/format.js'
 import { computeRelationTerm } from '../lib/kinship/index.js'
 import { compareAge } from '../lib/kinship/birth.js'
@@ -122,6 +123,15 @@ export default function PersonDetail() {
             </dl>
           </div>
         </div>
+        {person.tags?.length > 0 && (
+          <div className="mt-3 flex flex-wrap gap-1.5">
+            {person.tags.map((t) => (
+              <span key={t} className="rounded-full bg-accent-soft px-2.5 py-0.5 text-xs font-medium text-accent">
+                #{t}
+              </span>
+            ))}
+          </div>
+        )}
         {person.note && (
           <p className="mt-3 whitespace-pre-wrap rounded-xl bg-surface-2 px-3 py-2 text-sm text-ink" data-selectable>
             {person.note}
@@ -146,6 +156,9 @@ export default function PersonDetail() {
         </div>
       </section>
 
+      {/* 屬性 */}
+      <StatsPanel person={person} />
+
       {/* 關係 */}
       <section className="card p-4">
         <div className="mb-2 flex items-center justify-between">
@@ -163,8 +176,8 @@ export default function PersonDetail() {
           onAdd={canEdit ? () => { setAdding('parent'); setPickId(null) } : null}
         />
         <RelationGroup
-          title="配偶"
-          empty="尚無配偶紀錄"
+          title="配偶 / 伴侶"
+          empty="尚無配偶或伴侶紀錄"
           items={spouseRows.map((r) => {
             const other = r.person_a_id === id ? r.person_b_id : r.person_a_id
             return {
@@ -214,7 +227,7 @@ export default function PersonDetail() {
         {canEdit && adding && (
           <div className="mt-3 rounded-2xl bg-surface-2 p-3">
             <div className="mb-2 flex items-center justify-between">
-              <p className="text-sm font-semibold text-ink">新增{{ parent: '父母', child: '子女', spouse: '配偶', sibling: '兄弟姊妹' }[adding]}</p>
+              <p className="text-sm font-semibold text-ink">新增{{ parent: '父母', child: '子女', spouse: '配偶 / 伴侶', sibling: '兄弟姊妹' }[adding]}</p>
               <button onClick={() => setAdding(null)} className="text-xs text-muted">
                 取消
               </button>

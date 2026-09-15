@@ -392,13 +392,21 @@ function termForSteps(viewpointId, steps, graph, opts) {
   return { term: '親屬', kind: 'fallback', needsBirthday: false }
 }
 
-/** 直接的離婚配偶(BFS 不走離婚邊,所以要另外判斷) */
-function divorcedSpouseTerm(viewpointId, targetId, graph) {
+/**
+ * 直接的配偶 / 伴侶關係中,不能交給 BFS 的幾種:
+ * - 離婚 / 前伴侶:BFS 不走已結束的邊,要另外判斷(即使可經由共同孩子繞到,也應顯示前夫 / 前妻)
+ * - 未婚伴侶:走得到,但不該叫先生 / 太太
+ */
+function directSpouseTerm(viewpointId, targetId, graph) {
   const list = graph.spousesOf.get(viewpointId) || []
   const hit = list.find((s) => s.id === targetId)
-  if (!hit || hit.status !== 'divorced') return null
+  if (!hit) return null
   const T = graph.persons.get(targetId)
-  return { ...byGender(T, '前夫', '前妻', '前配偶'), path: [{ type: 'spouse', from: viewpointId, to: targetId }], generation: 0 }
+  const base = { path: [{ type: 'spouse', from: viewpointId, to: targetId }], generation: 0 }
+  if (hit.status === 'divorced') return { ...byGender(T, '前夫', '前妻', '前配偶'), ...base }
+  if (hit.status === 'ex_partner') return { term: '前伴侶', kind: 'exact', needsBirthday: false, ...base }
+  if (hit.status === 'partner') return { term: '伴侶', kind: 'exact', needsBirthday: false, ...base }
+  return null
 }
 
 function finish(result, steps) {
@@ -419,9 +427,8 @@ const SELF = () => ({ term: '自己', kind: 'self', needsBirthday: false, path: 
 export function computeRelationTerm(viewpointId, targetId, graph, options = {}) {
   if (!graph?.persons?.has(viewpointId) || !graph.persons.has(targetId)) return null
   if (viewpointId === targetId) return SELF()
-  // 直接的離婚配偶優先(即使有共同孩子可以繞路到達,也應顯示前夫 / 前妻)
-  const divorced = divorcedSpouseTerm(viewpointId, targetId, graph)
-  if (divorced) return divorced
+  const direct = directSpouseTerm(viewpointId, targetId, graph)
+  if (direct) return direct
   const best = bfs(graph, viewpointId, { toId: targetId })
   const steps = pathFromBfs(best, targetId)
   if (!steps) return null
@@ -441,9 +448,9 @@ export function computeAllRelationTerms(viewpointId, graph, options = {}) {
       out.set(id, SELF())
       continue
     }
-    const divorced = divorcedSpouseTerm(viewpointId, id, graph)
-    if (divorced) {
-      out.set(id, divorced)
+    const direct = directSpouseTerm(viewpointId, id, graph)
+    if (direct) {
+      out.set(id, direct)
       continue
     }
     const steps = pathFromBfs(best, id)
