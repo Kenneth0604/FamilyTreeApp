@@ -94,7 +94,7 @@ export default function StatsPanel({ person }) {
             <input type="range" min="0" max="10" step="1" value={draft.power} onChange={(e) => setDraft({ ...draft, power: Number(e.target.value) })} className="mt-1.5 w-full accent-accent" />
             <p className="mt-1 text-[11px] text-muted">這個人在家族裡的份量。數字越大,樹狀圖上的卡片越大。</p>
           </div>
-          <p className="text-xs text-muted">勾選要評的屬性,拉滑桿給 0–10 分。沒勾的不會顯示,也不計入綜合評分。</p>
+          <p className="text-xs text-muted">勾選要評的屬性,拉滑桿給 0–10 分。沒勾的不會顯示,也不計入綜合評分。標「負面」的屬性分數越高越糟,綜合評分會反過來算。</p>
           <div className="space-y-2">
             {STATS.map((s) => {
               const on = Number.isFinite(draft.stats[s.id])
@@ -113,7 +113,10 @@ export default function StatsPanel({ person }) {
                       className="h-4 w-4 accent-primary"
                     />
                     <span className="w-6 text-center">{s.icon}</span>
-                    <span className="flex-1 font-medium">{s.label}</span>
+                    <span className="flex-1 font-medium">
+                      {s.label}
+                      {s.negative && <span className="ml-1.5 rounded-full bg-danger-soft px-1.5 py-px text-[10px] font-normal text-danger">負面</span>}
+                    </span>
                     {on && (
                       <span className="text-xs text-muted">
                         {draft.stats[s.id]} · {statDescriptor(s, draft.stats[s.id])}
@@ -145,9 +148,12 @@ function StatBar({ stat, value }) {
   return (
     <div className="flex items-center gap-2">
       <span className="w-6 text-center text-base leading-none">{stat.icon}</span>
-      <span className="w-12 shrink-0 text-sm text-ink">{stat.label}</span>
+      <span className="w-12 shrink-0 text-sm text-ink" title={stat.negative ? '負面屬性:越高越糟' : undefined}>
+        {stat.label}
+      </span>
       <div className="h-2.5 flex-1 overflow-hidden rounded-full bg-surface-2">
-        <div className="h-full rounded-full bg-primary transition-[width]" style={{ width: `${value * 10}%` }} />
+        {/* 負面屬性用警示色,一眼看出「這條越長越糟」 */}
+        <div className={`h-full rounded-full transition-[width] ${stat.negative ? 'bg-danger/70' : 'bg-primary'}`} style={{ width: `${value * 10}%` }} />
       </div>
       <span className="w-6 shrink-0 text-right text-xs font-semibold tabular-nums text-ink">{value}</span>
       <span className="w-20 shrink-0 truncate text-[11px] text-muted">{statDescriptor(stat, value)}</span>

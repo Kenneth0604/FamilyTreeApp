@@ -62,8 +62,10 @@
   --t-hero-to: #a78bfa;
   /* 樹狀圖血管連線:玫瑰血色(介於 primary 與 danger 之間)、流動高光、伴侶(偏紫)、已結束(乾枯) */
   --t-vessel: #d9738f;
-  --t-vessel-flow: #fff1f5;
+  --t-vessel-core: #eea3b8;
+  --t-vessel-flow: #fff6f9;
   --t-vessel-partner: #b79ae8;
+  --t-vessel-partner-core: #d3c3f4;
   --t-vessel-ended: #d9c4cf;
   --t-vessel-ended-line: #c4a7b6;
 }
@@ -97,8 +99,10 @@
   --t-hero-from: #3a3f48;
   --t-hero-to: #1b1e23;
   --t-vessel: #a95a72;
-  --t-vessel-flow: #ffc2d3;
+  --t-vessel-core: #c4788f;
+  --t-vessel-flow: #ffd9e4;
   --t-vessel-partner: #8a80a8;
+  --t-vessel-partner-core: #a69dbf;
   --t-vessel-ended: #4a4f58;
   --t-vessel-ended-line: #6b7280;
 }
@@ -174,22 +178,25 @@ input[type="date"], input[type="number"] {
 .react-flow__minimap { background: var(--t-surface); }
 .react-flow__handle { opacity: 0; pointer-events: none; }
 /* ---- 血管連線(src/components/VesselEdge.jsx)----
-   body = 封閉形狀填色;flow = 被血管形狀裁切的粗虛線,動 stroke-dashoffset 就會沿路徑流動(父母 → 孩子)。
-   只用 path + clipPath + CSS keyframes,手機瀏覽器都吃,零 JS 逐幀。 */
+   body = 封閉形狀填色;core = 寬度一半的淺色內芯(圓管漸層感);
+   flow = 沿中心線的圓點虛線,被血管形狀裁切,動 stroke-dashoffset 就會沿路徑流動(父母 → 孩子)。
+   只用 path + clipPath + CSS keyframes,手機瀏覽器都吃,零 JS 逐幀、零 filter。 */
 .vessel-body { fill: var(--t-vessel); }
+.vessel-core { fill: var(--t-vessel-core); }
 .vessel-flow {
   fill: none;
   stroke: var(--t-vessel-flow);
-  stroke-width: 14; /* 蓋過最寬的管徑,實際形狀由 clipPath 決定 */
-  stroke-dasharray: 6 14;
-  stroke-linecap: butt;
-  opacity: 0.6;
-  animation: vessel-flow 1.4s linear infinite;
+  stroke-linecap: round;
+  stroke-dasharray: 0.01 26; /* 幾乎為 0 的 dash + round cap = 直徑等於 stroke-width 的圓粒,每 26px 一顆 */
+  animation: vessel-flow 2.6s linear infinite;
 }
-@keyframes vessel-flow { to { stroke-dashoffset: -20; } } /* 一個週期 = dasharray 總長,才能無縫循環 */
+.vessel-flow-glow { stroke-width: 7; opacity: 0.25; } /* 大而淡:光暈 */
+.vessel-flow-dot { stroke-width: 3; opacity: 0.9; }   /* 小而亮:粒子本體 */
+@keyframes vessel-flow { to { stroke-dashoffset: -26.01; } } /* 一個週期 = dasharray 總長,才能無縫循環 */
 /* 配偶沒有血緣:靜態血管。伴侶偏紫、稍細;離婚 / 前伴侶淡化 + 虛線外框,像乾掉的空管 */
-.vessel-spouse .vessel-body { opacity: 0.85; }
+.vessel-spouse .vessel-body, .vessel-spouse .vessel-core { opacity: 0.85; }
 .vessel-partner .vessel-body { fill: var(--t-vessel-partner); }
+.vessel-partner .vessel-core { fill: var(--t-vessel-partner-core); }
 .vessel-divorced .vessel-body { fill: var(--t-vessel-ended); opacity: 0.4; }
 .vessel-ex_partner .vessel-body { fill: var(--t-vessel-ended); opacity: 0.28; }
 .vessel-outline { fill: none; stroke: var(--t-vessel-ended-line); stroke-width: 1; stroke-dasharray: 3 3; }
@@ -206,7 +213,9 @@ input[type="date"], input[type="number"] {
   box-shadow: 0 0 0 1px var(--t-line);
 }
 @media (prefers-reduced-motion: reduce) {
-  .vessel-flow { animation: none; opacity: 0.3; }
+  .vessel-flow { animation: none; }
+  .vessel-flow-glow { display: none; }
+  .vessel-flow-dot { opacity: 0.35; }
 }
 .tree-canvas { touch-action: none; }
 /* 卡片要能長按拖曳:關掉 iOS 長按預覽 / 文字選取,否則系統選單會蓋住畫面 */

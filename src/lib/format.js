@@ -79,28 +79,29 @@ export function parseList(text) {
 export const parseNicknames = parseList
 
 /**
- * 遊戲角色式屬性(0–10)。low / high 是低分 / 高分時的描述,越好笑越好
+ * 遊戲角色式屬性(0–10)。low / high 是低分 / 高分時的描述,越好笑越好。
+ * negative = 負面屬性:分數越高越糟,算綜合評分時反過來計(10 - 分數)
  */
 export const STATS = [
   { id: 'fun', label: '有趣', icon: '🎉', low: '無聊到睡著', high: '全場焦點' },
-  { id: 'crazy', label: '有病', icon: '🤪', low: '正常人', high: '病入膏肓' },
-  { id: 'temper', label: '脾氣', icon: '🌋', low: '佛系', high: '一秒爆炸' },
+  { id: 'crazy', label: '有病', icon: '🤪', low: '正常人', high: '病入膏肓', negative: true },
+  { id: 'temper', label: '脾氣', icon: '🌋', low: '一秒爆炸', high: '佛系' },
   { id: 'smart', label: '聰明', icon: '🧠', low: '傻人有傻福', high: '人形電腦' },
   { id: 'education', label: '學歷', icon: '🎓', low: '社會大學', high: '博士後' },
   { id: 'rich', label: '有錢', icon: '💰', low: '月光族', high: '土豪' },
   { id: 'looks', label: '顏值', icon: '✨', low: '靠氣質', high: '天選之人' },
   { id: 'cooking', label: '廚藝', icon: '🍳', low: '黑暗料理', high: '總鋪師' },
   { id: 'drinking', label: '酒量', icon: '🍺', low: '一杯倒', high: '千杯不醉' },
-  { id: 'nagging', label: '愛唸', icon: '🗣️', low: '惜字如金', high: '唸經大師' },
+  { id: 'nagging', label: '愛唸', icon: '🗣️', low: '惜字如金', high: '唸經大師', negative: true },
   { id: 'luck', label: '運氣', icon: '🍀', low: '烏鴉嘴', high: '天選之子' },
-  { id: 'stubborn', label: '固執', icon: '🪨', low: '隨便都好', high: '撞牆也不轉彎' },
+  { id: 'stubborn', label: '固執', icon: '🪨', low: '隨便都好', high: '撞牆也不轉彎', negative: true },
   { id: 'gossip', label: '八卦', icon: '📡', low: '不知人間事', high: '家族情報局' },
   { id: 'sleepy', label: '嗜睡', icon: '😴', low: '早起的鳥', high: '睡到自然醒' },
   { id: 'generous', label: '大方', icon: '🧧', low: '紅包薄如紙', high: '紅包厚如磚' },
   { id: 'tech', label: '科技力', icon: '📱', low: '長輩圖製造機', high: '3C 達人' },
   { id: 'direction', label: '方向感', icon: '🧭', low: '出門就迷路', high: '人體 GPS' },
   { id: 'singing', label: '歌喉', icon: '🎤', low: '五音不全', high: '麥霸' },
-  { id: 'lazy', label: '懶', icon: '🛋️', low: '勤勞小蜜蜂', high: '沙發長出來' },
+  { id: 'lazy', label: '懶', icon: '🛋️', low: '勤勞小蜜蜂', high: '沙發長出來', negative: true },
   { id: 'gaming', label: '電動', icon: '🎮', low: '不知 Switch 為何物', high: '電競選手' },
   { id: 'foodie', label: '吃貨', icon: '🍜', low: '吃不下', high: '什麼都吃' },
   { id: 'talkative', label: '話多', icon: '💬', low: '句點王', high: '停不下來' },
@@ -150,13 +151,16 @@ const RANKS = [
   [0, 'D', '新手村'],
 ]
 
-/** 綜合評分:已評屬性的平均 × 10(0–100),附等級、稱號、最強 / 最弱屬性;沒評任何屬性回 null */
+/** 負面屬性反過來算:有病 8 分 = 只值 2 分 */
+export const effectiveStat = (stat, value) => (stat.negative ? 10 - value : value)
+
+/** 綜合評分:已評屬性(負面者反算)的平均 × 10(0–100),附等級、稱號、最強 / 最弱屬性;沒評任何屬性回 null */
 export function overallRating(stats) {
-  const items = STATS.filter((s) => Number.isFinite(stats?.[s.id])).map((s) => ({ ...s, value: stats[s.id] }))
+  const items = STATS.filter((s) => Number.isFinite(stats?.[s.id])).map((s) => ({ ...s, value: stats[s.id], effective: effectiveStat(s, stats[s.id]) }))
   if (!items.length) return null
-  const score = Math.round((items.reduce((a, s) => a + s.value, 0) / items.length) * 10)
+  const score = Math.round((items.reduce((a, s) => a + s.effective, 0) / items.length) * 10)
   const [, rank, title] = RANKS.find(([min]) => score >= min)
-  const sorted = [...items].sort((a, b) => b.value - a.value)
+  const sorted = [...items].sort((a, b) => b.effective - a.effective)
   return { score, rank, title, count: items.length, best: sorted[0], worst: sorted.length > 1 ? sorted[sorted.length - 1] : null }
 }
 
