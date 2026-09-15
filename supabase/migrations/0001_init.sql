@@ -6,7 +6,8 @@
 --   families        家族群組
 --   family_codes    每個家族兩種邀請碼:invite_code 加入後可編輯、view_code 加入後只能查看(只有 editor 讀得到)
 --   family_members  「某個登入帳號在某個家族中的身分」(role editor / viewer、self / viewpoint / 進階模式)
---   people          家族樹上的每一個人(大多數沒有帳號)
+--   people          家族樹上的每一個人(大多數沒有帳號;nicknames 為多個小名)
+--   person_entries  生平紀事:每人多筆履歷式條列(職業 / 學歷 / 事蹟 / 居住地 / 榮譽 / 其他),含起迄時間
 --   parent_child    親子邊(有方向)
 --   spouses         配偶邊(無方向;married / divorced / widowed)
 -- 兄弟姊妹、叔伯、堂表…全部由前端的稱謂引擎以最短路徑推算,不另外儲存。
@@ -101,6 +102,30 @@ create table if not exists public.spouses (
 create unique index if not exists spouses_pair_unique
   on public.spouses (least(person_a_id, person_b_id), greatest(person_a_id, person_b_id));
 
+-- 小名 / 別名(可多個),顯示在姓名旁
+alter table public.people add column if not exists nicknames text[] not null default '{}';
+
+-- 生平紀事:履歷式條列。每人依類別(職業 / 學歷 / 事蹟 / 居住地 / 榮譽 / 其他)列出多筆,每筆可填起迄時間
+create table if not exists public.person_entries (
+  id          uuid primary key default gen_random_uuid(),
+  family_id   uuid not null references public.families(id) on delete cascade,
+  person_id   uuid not null references public.people(id) on delete cascade,
+  category    text not null check (category in ('career', 'education', 'event', 'residence', 'award', 'other')),
+  title       text not null check (length(trim(title)) > 0),
+  detail      text not null default '',
+  -- 與 birth_date 相同:'YYYY' / 'YYYY-MM' / 'YYYY-MM-DD' 或 null
+  start_date  text check (start_date is null or start_date ~ '^\d{4}(-\d{2}(-\d{2})?)?$'),
+  end_date    text check (end_date is null or end_date ~ '^\d{4}(-\d{2}(-\d{2})?)?$'),
+  ongoing     boolean not null default false,   -- 至今
+  sort_order  int not null default 0,
+  created_by  uuid references public.family_members(id) on delete set null,
+  updated_by  uuid references public.family_members(id) on delete set null,
+  created_at  timestamptz not null default now(),
+  updated_at  timestamptz not null default now()
+);
+create index if not exists person_entries_family_idx on public.person_entries(family_id);
+create index if not exists person_entries_person_idx on public.person_entries(person_id);
+
 create index if not exists people_family_idx        on public.people(family_id);
 create index if not exists parent_child_family_idx  on public.parent_child(family_id);
 create index if not exists parent_child_child_idx   on public.parent_child(child_id);
@@ -123,6 +148,10 @@ create trigger people_touch before update on public.people
 
 drop trigger if exists spouses_touch on public.spouses;
 create trigger spouses_touch before update on public.spouses
+  for each row execute function public.touch_updated_at();
+
+drop trigger if exists person_entries_touch on public.person_entries;
+create trigger person_entries_touch before update on public.person_entries
   for each row execute function public.touch_updated_at();
 
 -- ----------------------------------------------------------------------------
@@ -273,6 +302,7 @@ alter table public.family_members enable row level security;
 alter table public.people         enable row level security;
 alter table public.parent_child   enable row level security;
 alter table public.spouses        enable row level security;
+alter table public.person_entries enable row level security;
 
 drop policy if exists "families member select" on public.families;
 drop policy if exists "families member update" on public.families;
@@ -302,7 +332,7 @@ create policy "members delete own" on public.family_members for delete to authen
 do $$
 declare t text;
 begin
-  foreach t in array array['people', 'parent_child', 'spouses'] loop
+  foreach t in array array['people', 'parent_child', 'spouses', 'person_entries'] loop
     execute format('drop policy if exists %I on public.%I', t || ' member all', t);
     execute format('drop policy if exists %I on public.%I', t || ' member select', t);
     execute format('drop policy if exists %I on public.%I', t || ' editor insert', t);
@@ -359,7 +389,7 @@ grant execute on function public.keep_alive(text) to anon, authenticated;
 do $$
 declare t text;
 begin
-  foreach t in array array['families', 'family_codes', 'family_members', 'people', 'parent_child', 'spouses'] loop
+  foreach t in array array['families', 'family_codes', 'family_members', 'people', 'parent_child', 'spouses', 'person_entries'] loop
     begin
       execute format('alter publication supabase_realtime add table public.%I', t);
     exception when duplicate_object then

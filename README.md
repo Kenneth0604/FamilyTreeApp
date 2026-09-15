@@ -20,7 +20,8 @@
 | 樹狀圖 | 以視角為中心、依世代分層(配偶並排、子女在下一層),節點顯示大頭照 / 姓名 / 稱謂,點節點看詳細 |
 | 成員列表 | 搜尋姓名或稱謂,依世代分組,卡片顯示姓名、稱謂、年齡、大頭照 |
 | 新增 / 編輯 | 姓名、性別、生日(可只填年份)、是否過世、大頭照、備註;新增時選「跟樹上哪位成員是什麼關係」(父母 / 子女 / 配偶 / 兄弟姊妹)。選兄弟姊妹但對方沒有父母時,自動建立可稍後補資料的父 / 母佔位節點 |
-| 詳細頁 | 基本資料、與視角的稱謂(含推算路徑)、管理父母 / 配偶(含婚姻狀態)/ 子女關係、兄弟姊妹(自動推算) |
+| 詳細頁 | 基本資料(姓名旁顯示多個小名)、與視角的稱謂(含推算路徑)、管理父母 / 配偶(含婚姻狀態)/ 子女關係、兄弟姊妹(自動推算) |
+| 生平紀事 | 履歷式條列:職業經歷 / 學歷 / 重要事蹟 / 居住地 / 榮譽獎項 / 其他,各區 1. 2. 3. 依時間排序;每筆有標題、起迄時間(可只填年份、可勾「至今」)與詳細說明 |
 | 設定 | 切換視角(我是誰)、綁定帳號的真實身分、進階稱謂模式、兩種邀請碼管理(分享 / 重新產生,僅可編輯成員可見)、家族名稱、主題(粉粉 / 黑黑)、切換家族、離開家族 |
 | 即時同步 | Supabase Realtime + 60 秒輪詢 + 回到前景時重抓 |
 
@@ -83,6 +84,7 @@ npm test
 | `people` | name、gender(male / female / unspecified)、birth_date(文字,`YYYY` / `YYYY-MM` / `YYYY-MM-DD` 或 null)、is_deceased、avatar_url、note、created_by / updated_by / updated_at |
 | `parent_child` | parent_id → child_id |
 | `spouses` | person_a_id、person_b_id、status(married / divorced / widowed) |
+| `person_entries` | 生平紀事:person_id、category(career / education / event / residence / award / other)、title、detail、start_date / end_date(同 birth_date 格式)、ongoing |
 
 RLS:所有表以 `is_family_member(family_id)` 判斷讀取,寫入另需 `is_family_editor(family_id)`(`family_members.role = 'editor'`);兩種邀請碼放在獨立的 `family_codes` 表,RLS 只讓 editor 讀。建立家族 / 加入(`join_family` 依碼是 invite_code 或 view_code 給 editor / viewer)/ 重新產生兩種碼都透過 security definer 的 RPC。
 

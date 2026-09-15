@@ -18,7 +18,7 @@ const StoreContext = createContext(null)
 const FAMILY_KEY = 'familytree:family'
 const cacheKey = (fid) => `familytree:cache:${fid}`
 const POLL_MS = 60_000
-const WATCHED_TABLES = ['people', 'parent_child', 'spouses', 'family_members', 'families', 'family_codes']
+const WATCHED_TABLES = ['people', 'parent_child', 'spouses', 'person_entries', 'family_members', 'families', 'family_codes']
 
 const AUTH_EMAIL_DOMAIN = 'familytree.invalid'
 const USERNAME_PATTERN = /^[a-zA-Z0-9_-]{2,30}$/
@@ -205,6 +205,7 @@ export function StoreProvider({ children }) {
   const [people, setPeople] = useState([])
   const [parentChild, setParentChild] = useState([])
   const [spouses, setSpouses] = useState([])
+  const [entries, setEntries] = useState([]) // 生平紀事(整個家族一次載入)
   const [ready, setReady] = useState(false)
   const [fatal, setFatal] = useState('')
   const [offline, setOffline] = useState(typeof navigator !== 'undefined' && navigator.onLine === false)
@@ -218,23 +219,25 @@ export function StoreProvider({ children }) {
     setPeople(snap.people ?? [])
     setParentChild(snap.parentChild ?? [])
     setSpouses(snap.spouses ?? [])
+    setEntries(snap.entries ?? [])
   }, [])
 
   const refresh = useCallback(async () => {
     if (!familyId || !authUser) return
     setSyncing(true)
     try {
-      const [fam, mem, ppl, pc, sp, cd] = await Promise.all([
+      const [fam, mem, ppl, pc, sp, en, cd] = await Promise.all([
         supabase.from('families').select('*').eq('id', familyId).maybeSingle(),
         supabase.from('family_members').select('*').eq('family_id', familyId).order('joined_at'),
         supabase.from('people').select('*').eq('family_id', familyId).order('created_at'),
         supabase.from('parent_child').select('*').eq('family_id', familyId),
         supabase.from('spouses').select('*').eq('family_id', familyId),
+        supabase.from('person_entries').select('*').eq('family_id', familyId).order('created_at'),
         // viewer 被 RLS 擋掉會拿到 null(不是錯誤)
         supabase.from('family_codes').select('*').eq('family_id', familyId).maybeSingle(),
       ])
-      for (const r of [fam, mem, ppl, pc, sp]) throwIf(r.error)
-      const snap = { family: fam.data, members: mem.data ?? [], people: ppl.data ?? [], parentChild: pc.data ?? [], spouses: sp.data ?? [], at: Date.now() }
+      for (const r of [fam, mem, ppl, pc, sp, en]) throwIf(r.error)
+      const snap = { family: fam.data, members: mem.data ?? [], people: ppl.data ?? [], parentChild: pc.data ?? [], spouses: sp.data ?? [], entries: en.data ?? [], at: Date.now() }
       applySnapshot(snap)
       setCodes(cd.error ? null : cd.data)
       writeJSON(cacheKey(familyId), snap)
@@ -385,6 +388,7 @@ export function StoreProvider({ children }) {
         setPeople((list) => list.filter((p) => p.id !== id))
         setParentChild((list) => list.filter((r) => r.parent_id !== id && r.child_id !== id))
         setSpouses((list) => list.filter((r) => r.person_a_id !== id && r.person_b_id !== id))
+        setEntries((list) => list.filter((r) => r.person_id !== id))
       }),
     [run],
   )
@@ -441,6 +445,39 @@ export function StoreProvider({ children }) {
         const { error } = await supabase.from('spouses').delete().eq('id', id)
         throwIf(error)
         setSpouses((list) => list.filter((r) => r.id !== id))
+      }),
+    [run],
+  )
+
+  const addEntry = useCallback(
+    (fields) =>
+      run(async () => {
+        const row = { ...stamp(), created_by: member?.id ?? null, ...fields }
+        const { data, error } = await supabase.from('person_entries').insert(row).select('*').single()
+        throwIf(error)
+        setEntries((list) => (list.some((r) => r.id === data.id) ? list : [...list, data]))
+        return data.id
+      }),
+    [run, stamp, member],
+  )
+
+  const updateEntry = useCallback(
+    (id, fields) =>
+      run(async () => {
+        const patch = { ...fields, updated_by: member?.id ?? null }
+        const { error } = await supabase.from('person_entries').update(patch).eq('id', id)
+        throwIf(error)
+        setEntries((list) => list.map((r) => (r.id === id ? { ...r, ...patch, updated_at: new Date().toISOString() } : r)))
+      }),
+    [run, member],
+  )
+
+  const deleteEntry = useCallback(
+    (id) =>
+      run(async () => {
+        const { error } = await supabase.from('person_entries').delete().eq('id', id)
+        throwIf(error)
+        setEntries((list) => list.filter((r) => r.id !== id))
       }),
     [run],
   )
@@ -516,19 +553,20 @@ export function StoreProvider({ children }) {
       authLoading, authUser, login, signup, logout,
       memberships, membershipsError, retryMemberships: () => setMembershipAttempt((n) => n + 1),
       familyId, family, codes, member, members, canEdit, switchFamily, createFamily, joinFamily, leaveFamily, renameFamily, regenerateInvite, regenerateViewCode,
-      people, parentChild, spouses, graph, peopleById, nameOf, memberName,
+      people, parentChild, spouses, entries, graph, peopleById, nameOf, memberName,
       ready, fatal, retry, refresh, offline, syncing,
       viewpointId, selfId, advanced, terms, termFor,
       addPerson, updatePerson, deletePerson, addParentChild, removeParentChild, addSpouse, updateSpouse, removeSpouse,
+      addEntry, updateEntry, deleteEntry,
       setViewpoint, setSelf, setAdvanced, setDisplayName,
       toast,
     }),
     [
       authLoading, authUser, login, signup, logout, memberships, membershipsError, familyId, family, codes, member, members, canEdit,
-      switchFamily, createFamily, joinFamily, leaveFamily, renameFamily, regenerateInvite, regenerateViewCode, people, parentChild, spouses,
+      switchFamily, createFamily, joinFamily, leaveFamily, renameFamily, regenerateInvite, regenerateViewCode, people, parentChild, spouses, entries,
       graph, peopleById, nameOf, memberName, ready, fatal, retry, refresh, offline, syncing, viewpointId, selfId, advanced,
       terms, termFor, addPerson, updatePerson, deletePerson, addParentChild, removeParentChild, addSpouse, updateSpouse,
-      removeSpouse, setViewpoint, setSelf, setAdvanced, setDisplayName, toast,
+      removeSpouse, addEntry, updateEntry, deleteEntry, setViewpoint, setSelf, setAdvanced, setDisplayName, toast,
     ],
   )
 

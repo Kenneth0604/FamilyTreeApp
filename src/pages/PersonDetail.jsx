@@ -5,6 +5,7 @@ import { useToast } from '../lib/toast.jsx'
 import Avatar from '../components/Avatar.jsx'
 import TermBadge from '../components/TermBadge.jsx'
 import PersonPicker from '../components/PersonPicker.jsx'
+import LifeEntries from '../components/LifeEntries.jsx'
 import { ageLabel, birthLabel, GENDER_LABEL, SPOUSE_STATUS_LABEL, relativeTime } from '../lib/format.js'
 import { computeRelationTerm } from '../lib/kinship/index.js'
 import { compareAge } from '../lib/kinship/birth.js'
@@ -99,6 +100,11 @@ export default function PersonDetail() {
           <div className="min-w-0 flex-1">
             <div className="flex flex-wrap items-center gap-1.5">
               <h1 className="text-xl font-bold text-ink">{person.name}</h1>
+              {person.nicknames?.map((n) => (
+                <span key={n} className="rounded-full bg-surface-2 px-2 py-0.5 text-xs text-muted">
+                  {n}
+                </span>
+              ))}
               {isSelf && <span className="term term-self">我</span>}
               {person.is_deceased && <span className="chip px-2 py-0.5 text-xs">已故</span>}
             </div>
@@ -224,6 +230,9 @@ export default function PersonDetail() {
           </div>
         )}
       </section>
+
+      {/* 生平紀事 */}
+      <LifeEntries personId={id} />
 
       {/* 編輯紀錄 */}
       <section className="px-1 text-xs text-muted">

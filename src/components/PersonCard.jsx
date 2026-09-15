@@ -12,6 +12,7 @@ export default function PersonCard({ person, term, isViewpoint, isSelf }) {
       <div className="min-w-0 flex-1">
         <div className="flex items-center gap-1.5">
           <span className="truncate font-semibold text-ink">{person.name}</span>
+          {person.nicknames?.length > 0 && <span className="truncate text-xs text-muted">{person.nicknames.join('、')}</span>}
           {isSelf && <span className="term term-self">我</span>}
           {person.is_deceased && <span className="text-xs text-muted">†</span>}
         </div>

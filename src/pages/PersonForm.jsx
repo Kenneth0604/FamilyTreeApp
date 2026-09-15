@@ -6,7 +6,7 @@ import AvatarUploader from '../components/AvatarUploader.jsx'
 import PersonPicker from '../components/PersonPicker.jsx'
 import Avatar from '../components/Avatar.jsx'
 import { parseBirth } from '../lib/kinship/birth.js'
-import { SPOUSE_STATUS_LABEL } from '../lib/format.js'
+import { SPOUSE_STATUS_LABEL, parseNicknames, toPartialDate } from '../lib/format.js'
 
 const REL = [
   { id: 'parent', label: '父母', desc: '新成員是這個人的爸爸 / 媽媽' },
@@ -14,15 +14,6 @@ const REL = [
   { id: 'spouse', label: '配偶', desc: '新成員是這個人的先生 / 太太' },
   { id: 'sibling', label: '兄弟姊妹', desc: '新成員與這個人有相同的父母' },
 ]
-
-function toBirth(y, m, d) {
-  if (!y) return null
-  const yy = String(y).padStart(4, '0')
-  if (!m) return yy
-  const mm = String(m).padStart(2, '0')
-  if (!d) return `${yy}-${mm}`
-  return `${yy}-${mm}-${String(d).padStart(2, '0')}`
-}
 
 export default function PersonForm() {
   const { id } = useParams()
@@ -36,6 +27,7 @@ export default function PersonForm() {
 
   // ----- 基本欄位 -----
   const [name, setName] = useState('')
+  const [nicknames, setNicknames] = useState('')
   const [gender, setGender] = useState('unspecified')
   const [year, setYear] = useState('')
   const [month, setMonth] = useState('')
@@ -55,6 +47,7 @@ export default function PersonForm() {
   useEffect(() => {
     if (editing) {
       setName(editing.name)
+      setNicknames((editing.nicknames || []).join('、'))
       setGender(editing.gender)
       const b = parseBirth(editing.birth_date)
       setYear(b ? String(b.y) : '')
@@ -95,8 +88,9 @@ export default function PersonForm() {
 
     const fields = {
       name: name.trim(),
+      nicknames: parseNicknames(nicknames),
       gender,
-      birth_date: toBirth(year, month, day),
+      birth_date: toPartialDate(year, month, day),
       is_deceased: deceased,
       avatar_url: avatar,
       note: note.trim(),
@@ -239,6 +233,11 @@ export default function PersonForm() {
         <div>
           <label className="label">姓名 *</label>
           <input value={name} onChange={(e) => setName(e.target.value)} className="input" placeholder="姓名或稱呼" required autoFocus={isNew} />
+        </div>
+        <div>
+          <label className="label">小名 / 別名(可多個)</label>
+          <input value={nicknames} onChange={(e) => setNicknames(e.target.value)} className="input" placeholder="例如:阿明、小明、Ming" />
+          <p className="mt-1 text-xs text-muted">用「、」或逗號分隔,會顯示在姓名旁邊,搜尋成員時也找得到。</p>
         </div>
         <div>
           <label className="label">性別</label>
