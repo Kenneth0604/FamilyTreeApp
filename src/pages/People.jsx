@@ -6,7 +6,7 @@ import { generationLabel } from '../lib/format.js'
 import { compareAge } from '../lib/kinship/birth.js'
 
 export default function People() {
-  const { people, termFor, viewpointId, selfId } = useStore()
+  const { people, termFor, viewpointId, selfId, canEdit } = useStore()
   const [q, setQ] = useState('')
 
   const groups = useMemo(() => {
@@ -44,10 +44,16 @@ export default function People() {
         <div className="empty">
           <p className="text-3xl">🌱</p>
           <p className="mt-2 font-semibold text-ink">家族樹還是空的</p>
-          <p className="mt-1">先新增第一位成員(通常是你自己),再從這個人一層層往外加父母、兄弟姊妹、配偶與子女。</p>
-          <Link to="/people/new" className="btn-primary mt-4">
-            新增第一位成員
-          </Link>
+          {canEdit ? (
+            <>
+              <p className="mt-1">先新增第一位成員(通常是你自己),再從這個人一層層往外加父母、兄弟姊妹、配偶與子女。</p>
+              <Link to="/people/new" className="btn-primary mt-4">
+                新增第一位成員
+              </Link>
+            </>
+          ) : (
+            <p className="mt-1">這個家族還沒有任何成員。</p>
+          )}
         </div>
       </div>
     )

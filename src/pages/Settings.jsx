@@ -7,7 +7,7 @@ import PersonPicker from '../components/PersonPicker.jsx'
 
 export default function Settings() {
   const store = useStore()
-  const { family, member, memberships, people, viewpointId, selfId, advanced, authUser, logout } = store
+  const { family, codes, member, canEdit, memberships, people, viewpointId, selfId, advanced, authUser, logout } = store
   const { theme, setTheme } = useTheme()
   const toast = useToast()
   const navigate = useNavigate()
@@ -27,7 +27,9 @@ export default function Settings() {
     }
   }
 
-  const inviteLink = family ? `${window.location.origin}${import.meta.env.BASE_URL}#/join/${family.invite_code}` : ''
+  const base = `${window.location.origin}${import.meta.env.BASE_URL}#`
+  const inviteLink = codes ? `${base}/join/${codes.invite_code}` : ''
+  const viewLink = codes ? `${base}/view/${codes.view_code}` : ''
 
   async function copy(text, label) {
     try {
@@ -38,8 +40,11 @@ export default function Settings() {
     }
   }
 
-  async function share() {
-    const text = `邀請你加入「${family?.name}」的家族樹!邀請碼:${family?.invite_code}\n${inviteLink}`
+  async function share(kind) {
+    const text =
+      kind === 'view'
+        ? `邀請你查看「${family?.name}」的家族樹!查看碼:${codes?.view_code}\n${viewLink}`
+        : `邀請你加入「${family?.name}」的家族樹!邀請碼:${codes?.invite_code}\n${inviteLink}`
     if (navigator.share) {
       try {
         await navigator.share({ title: '家族樹邀請', text })
@@ -89,39 +94,46 @@ export default function Settings() {
       </section>
 
       {/* 邀請 */}
-      <section>
-        <h2 className="section-title">邀請家人加入</h2>
-        <div className="card space-y-3 p-4">
-          <div className="flex items-center justify-between">
-            <span className="text-sm text-muted">邀請碼</span>
-            <button onClick={() => copy(family?.invite_code || '', '邀請碼')} className="font-mono text-2xl font-bold tracking-[0.25em] text-ink" data-selectable>
-              {family?.invite_code}
-            </button>
+      {canEdit ? (
+        <section>
+          <h2 className="section-title">邀請家人加入</h2>
+          <div className="space-y-3">
+            <CodeCard
+              title="邀請碼 · 可一起編輯"
+              code={codes?.invite_code}
+              link={inviteLink}
+              busy={busy}
+              onCopyCode={() => copy(codes?.invite_code || '', '邀請碼')}
+              onShare={() => share('join')}
+              onCopyLink={() => copy(inviteLink, '邀請連結')}
+              onRegenerate={() => window.confirm('重新產生後,舊的邀請碼與連結會立即失效。確定嗎?') && guard(() => store.regenerateInvite(), '已產生新的邀請碼')}
+            />
+            <CodeCard
+              title="查看碼 · 只能瀏覽"
+              code={codes?.view_code}
+              link={viewLink}
+              busy={busy}
+              onCopyCode={() => copy(codes?.view_code || '', '查看碼')}
+              onShare={() => share('view')}
+              onCopyLink={() => copy(viewLink, '查看連結')}
+              onRegenerate={() => window.confirm('重新產生後,舊的查看碼與連結會立即失效。確定嗎?') && guard(() => store.regenerateViewCode(), '已產生新的查看碼')}
+            />
           </div>
-          <div className="grid grid-cols-2 gap-2">
-            <button onClick={share} className="btn-primary btn-sm">
-              分享邀請連結
-            </button>
-            <button onClick={() => copy(inviteLink, '邀請連結')} className="btn-secondary btn-sm">
-              複製連結
-            </button>
-          </div>
-          <button
-            onClick={() => window.confirm('重新產生後,舊的邀請碼與連結會立即失效。確定嗎?') && guard(() => store.regenerateInvite(), '已產生新的邀請碼')}
-            className="w-full text-center text-xs text-muted"
-            disabled={busy}
-          >
-            重新產生邀請碼
-          </button>
-        </div>
-      </section>
+        </section>
+      ) : (
+        <section>
+          <p className="rounded-2xl bg-info-soft px-4 py-3 text-sm text-info">你是用查看碼加入這個家族的,只能瀏覽,不能新增或修改成員。想一起編輯請向家族成員索取邀請碼。</p>
+        </section>
+      )}
 
       {/* 家族與帳號 */}
       <section>
         <h2 className="section-title">家族與帳號</h2>
         <div className="card divide-y divide-line">
           <Row label="家族名稱">
-            {familyDraft === null ? (
+            {!canEdit ? (
+              <span className="text-sm text-ink">{family?.name}</span>
+            ) : familyDraft === null ? (
               <button onClick={() => setFamilyDraft(family?.name || '')} className="text-sm text-ink">
                 {family?.name} <span className="text-muted">✎</span>
               </button>
@@ -139,7 +151,7 @@ export default function Settings() {
             )}
           </Row>
           <Row label="家族成員">
-            <span className="text-sm text-ink">{store.members.map((m) => m.display_name).join('、')}</span>
+            <span className="text-sm text-ink">{store.members.map((m) => (m.role === 'viewer' ? `${m.display_name}(查看)` : m.display_name)).join('、')}</span>
           </Row>
           <Row label="帳號">
             <span className="text-sm text-ink" data-selectable>
@@ -192,6 +204,30 @@ export default function Settings() {
       </section>
 
       <p className="text-center text-xs text-muted">家族樹 v{__APP_VERSION__}</p>
+    </div>
+  )
+}
+
+function CodeCard({ title, code, link, busy, onCopyCode, onShare, onCopyLink, onRegenerate }) {
+  return (
+    <div className="card space-y-3 p-4">
+      <div className="flex items-center justify-between">
+        <span className="text-sm text-muted">{title}</span>
+        <button onClick={onCopyCode} className="font-mono text-2xl font-bold tracking-[0.25em] text-ink" data-selectable>
+          {code || '——'}
+        </button>
+      </div>
+      <div className="grid grid-cols-2 gap-2">
+        <button onClick={onShare} className="btn-primary btn-sm" disabled={!link}>
+          分享連結
+        </button>
+        <button onClick={onCopyLink} className="btn-secondary btn-sm" disabled={!link}>
+          複製連結
+        </button>
+      </div>
+      <button onClick={onRegenerate} className="w-full text-center text-xs text-muted" disabled={busy}>
+        重新產生
+      </button>
     </div>
   )
 }

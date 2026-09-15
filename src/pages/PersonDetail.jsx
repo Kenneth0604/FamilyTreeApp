@@ -14,7 +14,7 @@ export default function PersonDetail() {
   const navigate = useNavigate()
   const toast = useToast()
   const store = useStore()
-  const { peopleById, graph, parentChild, spouses, termFor, viewpointId, selfId, advanced, memberName, nameOf } = store
+  const { peopleById, graph, parentChild, spouses, termFor, viewpointId, selfId, advanced, memberName, nameOf, canEdit } = store
   const person = peopleById.get(id)
 
   const [adding, setAdding] = useState(null) // 'parent' | 'child' | 'spouse' | 'sibling' | null
@@ -122,9 +122,11 @@ export default function PersonDetail() {
           </p>
         )}
         <div className="mt-3 flex flex-wrap gap-2">
-          <Link to={`/people/${id}/edit`} className="btn-secondary btn-sm">
-            編輯資料
-          </Link>
+          {canEdit && (
+            <Link to={`/people/${id}/edit`} className="btn-secondary btn-sm">
+              編輯資料
+            </Link>
+          )}
           {!isViewpoint && (
             <button onClick={() => guard(() => store.setViewpoint(id), `已切換視角為 ${person.name}`)} className="btn-secondary btn-sm" disabled={busy}>
               以這個人的視角看
@@ -148,11 +150,11 @@ export default function PersonDetail() {
         <RelationGroup
           title="父母"
           empty="尚無父母紀錄"
-          items={parents.map((r) => ({ key: r.id, pid: r.parent_id, onRemove: () => guard(() => store.removeParentChild(r.id), '已移除') }))}
+          items={parents.map((r) => ({ key: r.id, pid: r.parent_id, onRemove: canEdit ? () => guard(() => store.removeParentChild(r.id), '已移除') : null }))}
           fromHere={fromHere}
           peopleById={peopleById}
           busy={busy}
-          onAdd={() => { setAdding('parent'); setPickId(null) }}
+          onAdd={canEdit ? () => { setAdding('parent'); setPickId(null) } : null}
         />
         <RelationGroup
           title="配偶"
@@ -162,7 +164,7 @@ export default function PersonDetail() {
             return {
               key: r.id,
               pid: other,
-              extra: (
+              extra: canEdit ? (
                 <select value={r.status} onChange={(e) => guard(() => store.updateSpouse(r.id, e.target.value))} className="input w-auto py-1 text-xs" disabled={busy}>
                   {Object.entries(SPOUSE_STATUS_LABEL).map(([k, v]) => (
                     <option key={k} value={k}>
@@ -170,25 +172,27 @@ export default function PersonDetail() {
                     </option>
                   ))}
                 </select>
+              ) : (
+                <span className="text-xs text-muted">{SPOUSE_STATUS_LABEL[r.status]}</span>
               ),
-              onRemove: () => guard(() => store.removeSpouse(r.id), '已移除'),
+              onRemove: canEdit ? () => guard(() => store.removeSpouse(r.id), '已移除') : null,
             }
           })}
           fromHere={fromHere}
           peopleById={peopleById}
           busy={busy}
-          onAdd={() => { setAdding('spouse'); setPickId(null) }}
+          onAdd={canEdit ? () => { setAdding('spouse'); setPickId(null) } : null}
         />
         <RelationGroup
           title="子女"
           empty="尚無子女紀錄"
           items={children
-            .map((r) => ({ key: r.id, pid: r.child_id, onRemove: () => guard(() => store.removeParentChild(r.id), '已移除') }))
+            .map((r) => ({ key: r.id, pid: r.child_id, onRemove: canEdit ? () => guard(() => store.removeParentChild(r.id), '已移除') : null }))
             .sort((a, b) => -compareAge(peopleById.get(a.pid), peopleById.get(b.pid)))}
           fromHere={fromHere}
           peopleById={peopleById}
           busy={busy}
-          onAdd={() => { setAdding('child'); setPickId(null) }}
+          onAdd={canEdit ? () => { setAdding('child'); setPickId(null) } : null}
         />
         <RelationGroup
           title="兄弟姊妹"
@@ -198,10 +202,10 @@ export default function PersonDetail() {
           fromHere={fromHere}
           peopleById={peopleById}
           busy={busy}
-          onAdd={() => { setAdding('sibling'); setPickId(null) }}
+          onAdd={canEdit ? () => { setAdding('sibling'); setPickId(null) } : null}
         />
 
-        {adding && (
+        {canEdit && adding && (
           <div className="mt-3 rounded-2xl bg-surface-2 p-3">
             <div className="mb-2 flex items-center justify-between">
               <p className="text-sm font-semibold text-ink">新增{{ parent: '父母', child: '子女', spouse: '配偶', sibling: '兄弟姊妹' }[adding]}</p>
@@ -232,9 +236,11 @@ export default function PersonDetail() {
         {term?.path?.length > 1 && <p className="mt-1">推算路徑:{nameOf(viewpointId)} → {term.path.map((s) => nameOf(s.to)).join(' → ')}</p>}
       </section>
 
-      <button onClick={onDelete} disabled={busy} className="btn-danger-outline w-full">
-        刪除這位成員
-      </button>
+      {canEdit && (
+        <button onClick={onDelete} disabled={busy} className="btn-danger-outline w-full">
+          刪除這位成員
+        </button>
+      )}
     </div>
   )
 }
@@ -247,9 +253,11 @@ function RelationGroup({ title, hint, empty, items, fromHere, peopleById, busy, 
           {title}
           {hint && <span className="ml-1.5 text-xs font-normal text-muted">{hint}</span>}
         </p>
-        <button onClick={onAdd} className="text-sm text-primary">
-          ＋ 新增
-        </button>
+        {onAdd && (
+          <button onClick={onAdd} className="text-sm text-primary">
+            ＋ 新增
+          </button>
+        )}
       </div>
       {items.length === 0 && <p className="text-xs text-muted">{empty}</p>}
       <div className="space-y-1">

@@ -4,7 +4,7 @@ import { useStore } from '../lib/store.jsx'
 import { onAppUpdate } from '../lib/sw-register.js'
 
 export default function Layout() {
-  const { family, member, offline, syncing, refresh, viewpointId, nameOf, people } = useStore()
+  const { family, member, canEdit, offline, syncing, refresh, viewpointId, nameOf, people } = useStore()
   const [updateReady, setUpdateReady] = useState(false)
   const location = useLocation()
   useEffect(() => onAppUpdate(() => setUpdateReady(true)), [])
@@ -14,16 +14,19 @@ export default function Layout() {
   const nav = [
     { to: '/', label: '樹狀圖', icon: TreeIcon, end: true },
     { to: '/people', label: '成員', icon: PeopleIcon },
-    { to: '/people/new', label: '新增', icon: PlusIcon },
+    canEdit ? { to: '/people/new', label: '新增', icon: PlusIcon } : null,
     { to: '/settings', label: '設定', icon: GearIcon },
-  ]
+  ].filter(Boolean)
 
   return (
     <div className="mx-auto flex h-full max-w-md flex-col bg-bg landscape:max-w-3xl">
       <header className="pt-safe hero sticky top-0 z-10 text-white shadow">
         <div className="flex items-center justify-between gap-3 px-4 py-3">
           <div className="min-w-0">
-            <h1 className="truncate text-lg font-bold tracking-wide">{family?.name || '家族樹'}</h1>
+            <h1 className="flex items-center gap-1.5 truncate text-lg font-bold tracking-wide">
+              <span className="truncate">{family?.name || '家族樹'}</span>
+              {!canEdit && <span className="shrink-0 rounded-full bg-white/20 px-2 py-0.5 text-[11px] font-medium">只能查看</span>}
+            </h1>
             <p className="truncate text-[11px] text-white/80">
               {viewpointId ? `視角:${nameOf(viewpointId)}` : people.length ? '尚未設定視角(到設定選「我是誰」)' : '從新增第一位成員開始'}
             </p>
@@ -50,7 +53,7 @@ export default function Layout() {
       </main>
 
       <nav className="pb-safe z-10 shrink-0 border-t border-line bg-surface">
-        <div className="mx-auto grid max-w-md grid-cols-4 landscape:max-w-3xl">
+        <div className="mx-auto grid max-w-md landscape:max-w-3xl" style={{ gridTemplateColumns: `repeat(${nav.length}, minmax(0, 1fr))` }}>
           {nav.map(({ to, label, icon: Icon, end }) => (
             <NavLink
               key={to}

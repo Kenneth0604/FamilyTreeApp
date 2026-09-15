@@ -3,18 +3,19 @@ import { useNavigate, useParams } from 'react-router-dom'
 import { useStore, authEmailToUsername } from '../lib/store.jsx'
 
 /**
- * 建立新家族 / 用邀請碼加入 / 切換家族
+ * 建立新家族 / 用邀請碼(可編輯)或查看碼(只能看)加入 / 切換家族
  * - 首次登入尚未加入任何家族時進入
- * - #/join/<邀請碼> 連結會自動帶入邀請碼
+ * - #/join/<邀請碼>、#/view/<查看碼> 連結會自動帶入
  * - 已有家族時也可從設定頁進來加入另一個家族
  */
-export default function FamilyGate() {
-  const { authUser, memberships, familyId, switchFamily, createFamily, joinFamily, logout } = useStore()
+export default function FamilyGate({ mode }) {
+  const { authUser, memberships, familyId, switchFamily, createFamily, joinFamily, joinFamilyAsViewer, logout } = useStore()
   const { code: codeParam } = useParams()
   const navigate = useNavigate()
   const defaultName = authEmailToUsername(authUser?.email) || ''
+  const linkTab = codeParam ? (mode === 'view' ? 'view' : 'join') : null
 
-  const [tab, setTab] = useState(codeParam ? 'join' : memberships?.length ? 'switch' : 'create')
+  const [tab, setTab] = useState(linkTab || (memberships?.length ? 'switch' : 'create'))
   const [displayName, setDisplayName] = useState(defaultName)
   const [familyName, setFamilyName] = useState('')
   const [code, setCode] = useState(codeParam?.toUpperCase() || '')
@@ -24,19 +25,9 @@ export default function FamilyGate() {
   useEffect(() => {
     if (codeParam) {
       setCode(codeParam.toUpperCase())
-      setTab('join')
+      setTab(linkTab)
     }
-  }, [codeParam])
-
-  // 用邀請連結進來但已是該家族成員 → 直接切換
-  useEffect(() => {
-    if (!codeParam || !memberships) return
-    const hit = memberships.find((m) => m.families?.invite_code === codeParam.toUpperCase())
-    if (hit) {
-      switchFamily(hit.family_id)
-      navigate('/', { replace: true })
-    }
-  }, [codeParam, memberships, switchFamily, navigate])
+  }, [codeParam, linkTab])
 
   async function onCreate(e) {
     e.preventDefault()
@@ -57,7 +48,9 @@ export default function FamilyGate() {
     setBusy(true)
     setError('')
     try {
-      await joinFamily(code, displayName)
+      // 已是成員時 RPC 也會回傳該家族 id(不會重複加入),直接切換過去
+      if (tab === 'view') await joinFamilyAsViewer(code, displayName)
+      else await joinFamily(code, displayName)
       navigate('/', { replace: true })
     } catch (err) {
       setError(err.message)
@@ -69,7 +62,8 @@ export default function FamilyGate() {
   const tabs = [
     memberships?.length ? ['switch', '我的家族'] : null,
     ['create', '建立新家族'],
-    ['join', '輸入邀請碼'],
+    ['join', '邀請碼'],
+    ['view', '查看碼'],
   ].filter(Boolean)
 
   return (
@@ -100,7 +94,10 @@ export default function FamilyGate() {
               className={`card flex w-full items-center justify-between p-4 text-left ${m.family_id === familyId ? 'ring-2 ring-primary' : ''}`}
             >
               <div>
-                <p className="font-semibold text-ink">{m.families?.name || '家族'}</p>
+                <p className="font-semibold text-ink">
+                  {m.families?.name || '家族'}
+                  {m.role === 'viewer' && <span className="ml-1.5 rounded-full bg-surface-2 px-2 py-0.5 text-xs font-normal text-muted">只能查看</span>}
+                </p>
                 <p className="text-xs text-muted">我在這裡叫「{m.display_name}」</p>
               </div>
               {m.family_id === familyId && <span className="text-sm text-primary">目前</span>}
@@ -126,10 +123,10 @@ export default function FamilyGate() {
         </form>
       )}
 
-      {tab === 'join' && (
+      {(tab === 'join' || tab === 'view') && (
         <form onSubmit={onJoin} className="card space-y-3 p-4">
           <div>
-            <label className="label">邀請碼</label>
+            <label className="label">{tab === 'view' ? '查看碼' : '邀請碼'}</label>
             <input
               value={code}
               onChange={(e) => setCode(e.target.value.toUpperCase())}
@@ -139,6 +136,9 @@ export default function FamilyGate() {
               autoCapitalize="characters"
               required
             />
+            <p className="mt-1 text-xs text-muted">
+              {tab === 'view' ? '用查看碼加入後只能瀏覽這個家族樹,不能新增或修改。' : '用邀請碼加入後可以和其他成員一起編輯。'}
+            </p>
           </div>
           <div>
             <label className="label">我在這個家族的顯示名稱</label>
@@ -146,7 +146,7 @@ export default function FamilyGate() {
           </div>
           {error && <p className="text-sm text-danger">{error}</p>}
           <button type="submit" disabled={busy || code.length < 6} className="btn-primary w-full">
-            {busy ? '加入中…' : '加入家族'}
+            {busy ? '加入中…' : tab === 'view' ? '查看家族樹' : '加入家族'}
           </button>
         </form>
       )}

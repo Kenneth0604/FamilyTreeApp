@@ -10,7 +10,7 @@
 import { compareAge } from './kinship/birth.js'
 
 export const NODE_W = 132
-export const NODE_H = 150
+export const NODE_H = 168
 const GAP_X = 28
 const GAP_Y = 90
 const COUPLE_GAP = 12

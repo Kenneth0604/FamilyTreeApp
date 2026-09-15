@@ -20,7 +20,7 @@ const PersonNode = memo(function PersonNode({ data }) {
       <Handle type="source" position={Position.Right} id="right" />
       <Handle type="target" position={Position.Left} id="left" />
       <Avatar person={person} size="lg" />
-      <div className="w-full truncate text-sm font-semibold text-ink">
+      <div className="line-clamp-2 w-full break-words text-center text-sm font-semibold leading-tight text-ink">
         {person.name}
         {person.is_deceased && <span className="ml-0.5 text-xs text-muted">†</span>}
       </div>
@@ -33,7 +33,18 @@ const PersonNode = memo(function PersonNode({ data }) {
   )
 })
 
-const nodeTypes = { person: PersonNode }
+/** 世代連接點:同一對父母(或單親)匯合成一個點,再往下分岔給各個孩子 */
+const JUNCTION_SIZE = 8
+const JunctionNode = memo(function JunctionNode() {
+  return (
+    <div className="rounded-full bg-line" style={{ width: JUNCTION_SIZE, height: JUNCTION_SIZE }}>
+      <Handle type="target" position={Position.Top} id="top" style={{ opacity: 0 }} />
+      <Handle type="source" position={Position.Bottom} id="bottom" style={{ opacity: 0 }} />
+    </div>
+  )
+})
+
+const nodeTypes = { person: PersonNode, junction: JunctionNode }
 
 export default function Tree() {
   return (
@@ -44,15 +55,42 @@ export default function Tree() {
 }
 
 function TreeCanvas() {
-  const { people, graph, terms, viewpointId, selfId, parentChild, spouses, peopleById } = useStore()
+  const { people, graph, terms, viewpointId, selfId, parentChild, spouses, peopleById, canEdit } = useStore()
   const navigate = useNavigate()
   const { fitView, setCenter } = useReactFlow()
 
   const layout = useMemo(() => layoutTree(graph, terms, viewpointId), [graph, terms, viewpointId])
 
+  // 同一對父母(或單親)先匯合成一個連接點,再從那個點分岔給各個孩子,取代「每對父母-孩子各畫一條線」
+  const junctions = useMemo(() => {
+    const childParents = new Map()
+    for (const r of parentChild) {
+      if (!layout.positions.has(r.parent_id) || !layout.positions.has(r.child_id)) continue
+      if (!childParents.has(r.child_id)) childParents.set(r.child_id, new Set())
+      childParents.get(r.child_id).add(r.parent_id)
+    }
+    const groups = new Map()
+    for (const [childId, parentSet] of childParents) {
+      const key = [...parentSet].sort().join('|')
+      if (!groups.has(key)) groups.set(key, { parentIds: [...parentSet], childIds: [] })
+      groups.get(key).childIds.push(childId)
+    }
+    const out = new Map()
+    for (const [key, g] of groups) {
+      const parentPos = g.parentIds.map((id) => layout.positions.get(id)).filter(Boolean)
+      const childPos = g.childIds.map((id) => layout.positions.get(id)).filter(Boolean)
+      if (!parentPos.length || !childPos.length) continue
+      const px = parentPos.reduce((s, p) => s + p.x, 0) / parentPos.length + NODE_W / 2
+      const parentBottom = Math.max(...parentPos.map((p) => p.y)) + NODE_H
+      const childTop = Math.min(...childPos.map((p) => p.y))
+      out.set(key, { id: `junction-${key}`, x: px, y: parentBottom + (childTop - parentBottom) / 2, parentIds: g.parentIds, childIds: g.childIds })
+    }
+    return out
+  }, [parentChild, layout])
+
   const nodes = useMemo(
-    () =>
-      people
+    () => [
+      ...people
         .filter((p) => layout.positions.has(p.id))
         .map((p) => ({
           id: p.id,
@@ -62,14 +100,27 @@ function TreeCanvas() {
           draggable: false,
           selectable: false,
         })),
-    [people, layout, terms, viewpointId, selfId],
+      ...[...junctions.values()].map((j) => ({
+        id: j.id,
+        type: 'junction',
+        position: { x: j.x - JUNCTION_SIZE / 2, y: j.y - JUNCTION_SIZE / 2 },
+        data: {},
+        draggable: false,
+        selectable: false,
+      })),
+    ],
+    [people, layout, terms, viewpointId, selfId, junctions],
   )
 
   const edges = useMemo(() => {
     const out = []
-    for (const r of parentChild) {
-      if (!peopleById.has(r.parent_id) || !peopleById.has(r.child_id)) continue
-      out.push({ id: `pc-${r.id}`, source: r.parent_id, target: r.child_id, sourceHandle: 'bottom', targetHandle: 'top', type: 'smoothstep', pathOptions: { borderRadius: 12 } })
+    for (const j of junctions.values()) {
+      for (const pid of j.parentIds) {
+        out.push({ id: `pc-in-${j.id}-${pid}`, source: pid, target: j.id, sourceHandle: 'bottom', targetHandle: 'top', type: 'smoothstep', pathOptions: { borderRadius: 12 } })
+      }
+      for (const cid of j.childIds) {
+        out.push({ id: `pc-out-${j.id}-${cid}`, source: j.id, target: cid, sourceHandle: 'bottom', targetHandle: 'top', type: 'smoothstep', pathOptions: { borderRadius: 12 } })
+      }
     }
     for (const s of spouses) {
       if (!peopleById.has(s.person_a_id) || !peopleById.has(s.person_b_id)) continue
@@ -89,7 +140,7 @@ function TreeCanvas() {
       })
     }
     return out
-  }, [parentChild, spouses, peopleById, layout])
+  }, [junctions, spouses, peopleById, layout])
 
   const onNodeClick = useCallback((_e, node) => navigate(`/people/${node.id}`), [navigate])
 
@@ -117,10 +168,16 @@ function TreeCanvas() {
       <div className="flex h-full flex-col items-center justify-center px-6 text-center">
         <p className="text-4xl">🌱</p>
         <p className="mt-2 font-semibold text-ink">家族樹還是空的</p>
-        <p className="mt-1 text-sm text-muted">先新增第一位成員(通常是你自己),再從這個人一層層往外加。</p>
-        <Link to="/people/new" className="btn-primary mt-4">
-          新增第一位成員
-        </Link>
+        {canEdit ? (
+          <>
+            <p className="mt-1 text-sm text-muted">先新增第一位成員(通常是你自己),再從這個人一層層往外加。</p>
+            <Link to="/people/new" className="btn-primary mt-4">
+              新增第一位成員
+            </Link>
+          </>
+        ) : (
+          <p className="mt-1 text-sm text-muted">這個家族還沒有任何成員。</p>
+        )}
       </div>
     )
   }

@@ -3,14 +3,14 @@
 -- 在 Supabase Dashboard → SQL Editor 直接執行整份檔案(可重複執行)。
 --
 -- 資料模型:
---   families        家族群組(邀請碼)
---   family_members  「某個登入帳號在某個家族中的身分」(self / viewpoint / 進階模式)
+--   families        家族群組(邀請碼 = 可編輯加入;查看碼 = 只能查看加入)
+--   family_members  「某個登入帳號在某個家族中的身分」(role editor / viewer、self / viewpoint / 進階模式)
 --   people          家族樹上的每一個人(大多數沒有帳號)
 --   parent_child    親子邊(有方向)
 --   spouses         配偶邊(無方向;married / divorced / widowed)
 -- 兄弟姊妹、叔伯、堂表…全部由前端的稱謂引擎以最短路徑推算,不另外儲存。
 --
--- RLS:所有表都以「family_id 是否在該使用者所屬的 family_members 中」判斷讀寫。
+-- RLS:所有表都以「family_id 是否在該使用者所屬的 family_members 中」判斷讀取;寫入另需 role = editor。
 -- ============================================================================
 
 create extension if not exists pgcrypto;
@@ -21,21 +21,27 @@ create extension if not exists pgcrypto;
 create table if not exists public.families (
   id           uuid primary key default gen_random_uuid(),
   name         text not null,
-  invite_code  text not null unique,
+  invite_code  text not null unique,   -- 加入後可編輯
+  view_code    text unique,            -- 加入後只能查看(既有資料在下方補齊後改為 not null)
   created_at   timestamptz not null default now()
 );
+alter table public.families add column if not exists view_code text unique;
 
 create table if not exists public.family_members (
   id                   uuid primary key default gen_random_uuid(),
   family_id            uuid not null references public.families(id) on delete cascade,
   auth_user_id         uuid not null references auth.users(id) on delete cascade,
   display_name         text not null,
+  role                 text not null default 'editor' check (role in ('editor', 'viewer')),
   self_person_id       uuid,            -- FK 在 people 建好後補上
   viewpoint_person_id  uuid,
   advanced_terms       boolean not null default false,
   joined_at            timestamptz not null default now(),
   unique (family_id, auth_user_id)
 );
+alter table public.family_members add column if not exists role text not null default 'editor';
+alter table public.family_members drop constraint if exists family_members_role_check;
+alter table public.family_members add constraint family_members_role_check check (role in ('editor', 'viewer'));
 
 create table if not exists public.people (
   id           uuid primary key default gen_random_uuid(),
@@ -125,6 +131,16 @@ returns boolean language sql stable security definer set search_path = public as
 $$;
 grant execute on function public.is_family_member(uuid) to authenticated;
 
+-- 可編輯的成員(role = editor);viewer 只能讀
+create or replace function public.is_family_editor(p_family_id uuid)
+returns boolean language sql stable security definer set search_path = public as $$
+  select exists (
+    select 1 from public.family_members m
+    where m.family_id = p_family_id and m.auth_user_id = auth.uid() and m.role = 'editor'
+  );
+$$;
+grant execute on function public.is_family_editor(uuid) to authenticated;
+
 -- 6 碼邀請碼(去掉容易混淆的 0/O/1/I)
 create or replace function public.gen_invite_code()
 returns text language plpgsql volatile as $$
@@ -139,28 +155,43 @@ begin
   return out;
 end $$;
 
+-- 產生一個 invite_code / view_code 都沒用過的新碼
+create or replace function public.gen_unique_family_code()
+returns text language plpgsql volatile as $$
+declare
+  code text;
+begin
+  loop
+    code := public.gen_invite_code();
+    exit when not exists (select 1 from public.families where invite_code = code or view_code = code);
+  end loop;
+  return code;
+end $$;
+
+-- 既有家族補上查看碼
+update public.families set view_code = public.gen_unique_family_code() where view_code is null;
+alter table public.families alter column view_code set not null;
+
 -- ----------------------------------------------------------------------------
--- RPC:建立家族 / 用邀請碼加入 / 重新產生邀請碼
+-- RPC:建立家族 / 用邀請碼加入 / 用查看碼加入 / 重新產生邀請碼與查看碼
 -- ----------------------------------------------------------------------------
 create or replace function public.create_family(p_name text, p_display_name text)
 returns uuid language plpgsql security definer set search_path = public as $$
 declare
   fid  uuid;
-  code text;
 begin
   if auth.uid() is null then raise exception '請先登入'; end if;
   if length(trim(coalesce(p_name, ''))) = 0 then raise exception '請輸入家族名稱'; end if;
-  loop
-    code := public.gen_invite_code();
-    exit when not exists (select 1 from public.families where invite_code = code);
-  end loop;
-  insert into public.families (name, invite_code) values (trim(p_name), code) returning id into fid;
-  insert into public.family_members (family_id, auth_user_id, display_name)
-    values (fid, auth.uid(), coalesce(nullif(trim(p_display_name), ''), '成員'));
+  insert into public.families (name, invite_code, view_code)
+    values (trim(p_name), public.gen_unique_family_code(), public.gen_unique_family_code())
+    returning id into fid;
+  insert into public.family_members (family_id, auth_user_id, display_name, role)
+    values (fid, auth.uid(), coalesce(nullif(trim(p_display_name), ''), '成員'), 'editor');
   return fid;
 end $$;
 grant execute on function public.create_family(text, text) to authenticated;
 
+-- 邀請碼:加入為可編輯;原本是 viewer 的會升級成 editor
 create or replace function public.join_family(p_invite_code text, p_display_name text)
 returns uuid language plpgsql security definer set search_path = public as $$
 declare
@@ -169,27 +200,63 @@ begin
   if auth.uid() is null then raise exception '請先登入'; end if;
   select id into fid from public.families where invite_code = upper(trim(p_invite_code));
   if fid is null then raise exception '找不到這個邀請碼'; end if;
-  insert into public.family_members (family_id, auth_user_id, display_name)
-    values (fid, auth.uid(), coalesce(nullif(trim(p_display_name), ''), '成員'))
-    on conflict (family_id, auth_user_id) do nothing;
+  insert into public.family_members (family_id, auth_user_id, display_name, role)
+    values (fid, auth.uid(), coalesce(nullif(trim(p_display_name), ''), '成員'), 'editor')
+    on conflict (family_id, auth_user_id) do update set role = 'editor';
   return fid;
 end $$;
 grant execute on function public.join_family(text, text) to authenticated;
+
+-- 查看碼:加入為只能查看;已是成員的不會被降級
+create or replace function public.join_family_as_viewer(p_view_code text, p_display_name text)
+returns uuid language plpgsql security definer set search_path = public as $$
+declare
+  fid uuid;
+begin
+  if auth.uid() is null then raise exception '請先登入'; end if;
+  select id into fid from public.families where view_code = upper(trim(p_view_code));
+  if fid is null then raise exception '找不到這個查看碼'; end if;
+  insert into public.family_members (family_id, auth_user_id, display_name, role)
+    values (fid, auth.uid(), coalesce(nullif(trim(p_display_name), ''), '成員'), 'viewer')
+    on conflict (family_id, auth_user_id) do nothing;
+  return fid;
+end $$;
+grant execute on function public.join_family_as_viewer(text, text) to authenticated;
 
 create or replace function public.regenerate_invite_code(p_family_id uuid)
 returns text language plpgsql security definer set search_path = public as $$
 declare
   code text;
 begin
-  if not public.is_family_member(p_family_id) then raise exception '你不是這個家族的成員'; end if;
-  loop
-    code := public.gen_invite_code();
-    exit when not exists (select 1 from public.families where invite_code = code);
-  end loop;
+  if not public.is_family_editor(p_family_id) then raise exception '只有可編輯的成員才能重新產生邀請碼'; end if;
+  code := public.gen_unique_family_code();
   update public.families set invite_code = code where id = p_family_id;
   return code;
 end $$;
 grant execute on function public.regenerate_invite_code(uuid) to authenticated;
+
+create or replace function public.regenerate_view_code(p_family_id uuid)
+returns text language plpgsql security definer set search_path = public as $$
+declare
+  code text;
+begin
+  if not public.is_family_editor(p_family_id) then raise exception '只有可編輯的成員才能重新產生查看碼'; end if;
+  code := public.gen_unique_family_code();
+  update public.families set view_code = code where id = p_family_id;
+  return code;
+end $$;
+grant execute on function public.regenerate_view_code(uuid) to authenticated;
+
+-- 邀請碼 / 查看碼只給 editor 看(否則 viewer 讀到邀請碼就能自行升級),其餘欄位所有成員可讀
+revoke select on public.families from anon, authenticated;
+grant select (id, name, created_at) on public.families to authenticated;
+
+create or replace function public.family_codes(p_family_id uuid)
+returns table (invite_code text, view_code text) language sql stable security definer set search_path = public as $$
+  select f.invite_code, f.view_code from public.families f
+  where f.id = p_family_id and public.is_family_editor(p_family_id);
+$$;
+grant execute on function public.family_codes(uuid) to authenticated;
 
 -- ----------------------------------------------------------------------------
 -- Row Level Security
@@ -205,7 +272,7 @@ drop policy if exists "families member update" on public.families;
 create policy "families member select" on public.families for select to authenticated
   using (public.is_family_member(id));
 create policy "families member update" on public.families for update to authenticated
-  using (public.is_family_member(id)) with check (public.is_family_member(id));
+  using (public.is_family_editor(id)) with check (public.is_family_editor(id));
 -- insert / 邀請碼查詢一律經由 RPC(security definer)
 
 drop policy if exists "members select" on public.family_members;
@@ -219,20 +286,25 @@ create policy "members delete own" on public.family_members for delete to authen
   using (auth_user_id = auth.uid());
 -- insert 一律經由 create_family / join_family
 
-drop policy if exists "people member all" on public.people;
-create policy "people member all" on public.people for all to authenticated
-  using (public.is_family_member(family_id)) with check (public.is_family_member(family_id));
-
-drop policy if exists "parent_child member all" on public.parent_child;
-create policy "parent_child member all" on public.parent_child for all to authenticated
-  using (public.is_family_member(family_id)) with check (public.is_family_member(family_id));
-
-drop policy if exists "spouses member all" on public.spouses;
-create policy "spouses member all" on public.spouses for all to authenticated
-  using (public.is_family_member(family_id)) with check (public.is_family_member(family_id));
+-- 家族樹資料:所有成員可讀,只有 editor 可寫
+do $$
+declare t text;
+begin
+  foreach t in array array['people', 'parent_child', 'spouses'] loop
+    execute format('drop policy if exists %I on public.%I', t || ' member all', t);
+    execute format('drop policy if exists %I on public.%I', t || ' member select', t);
+    execute format('drop policy if exists %I on public.%I', t || ' editor insert', t);
+    execute format('drop policy if exists %I on public.%I', t || ' editor update', t);
+    execute format('drop policy if exists %I on public.%I', t || ' editor delete', t);
+    execute format('create policy %I on public.%I for select to authenticated using (public.is_family_member(family_id))', t || ' member select', t);
+    execute format('create policy %I on public.%I for insert to authenticated with check (public.is_family_editor(family_id))', t || ' editor insert', t);
+    execute format('create policy %I on public.%I for update to authenticated using (public.is_family_editor(family_id)) with check (public.is_family_editor(family_id))', t || ' editor update', t);
+    execute format('create policy %I on public.%I for delete to authenticated using (public.is_family_editor(family_id))', t || ' editor delete', t);
+  end loop;
+end $$;
 
 -- ----------------------------------------------------------------------------
--- Storage:大頭照(公開讀取;路徑第一段為 family_id,只有該家族成員可上傳 / 刪除)
+-- Storage:大頭照(公開讀取;路徑第一段為 family_id,只有該家族的 editor 可上傳 / 刪除)
 -- ----------------------------------------------------------------------------
 insert into storage.buckets (id, name, public, file_size_limit, allowed_mime_types)
 values ('avatars', 'avatars', true, 5242880, array['image/jpeg', 'image/png', 'image/webp'])
@@ -245,11 +317,11 @@ drop policy if exists "avatars member delete" on storage.objects;
 create policy "avatars public read" on storage.objects for select
   using (bucket_id = 'avatars');
 create policy "avatars member insert" on storage.objects for insert to authenticated
-  with check (bucket_id = 'avatars' and public.is_family_member(((storage.foldername(name))[1])::uuid));
+  with check (bucket_id = 'avatars' and public.is_family_editor(((storage.foldername(name))[1])::uuid));
 create policy "avatars member update" on storage.objects for update to authenticated
-  using (bucket_id = 'avatars' and public.is_family_member(((storage.foldername(name))[1])::uuid));
+  using (bucket_id = 'avatars' and public.is_family_editor(((storage.foldername(name))[1])::uuid));
 create policy "avatars member delete" on storage.objects for delete to authenticated
-  using (bucket_id = 'avatars' and public.is_family_member(((storage.foldername(name))[1])::uuid));
+  using (bucket_id = 'avatars' and public.is_family_editor(((storage.foldername(name))[1])::uuid));
 
 -- ----------------------------------------------------------------------------
 -- Keep-alive:免費方案 7 天無活動會暫停專案。
