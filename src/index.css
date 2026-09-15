@@ -170,9 +170,12 @@ input[type="date"], input[type="number"] {
 .react-flow__edge-text { font-size: 10px; fill: var(--t-muted); }
 .react-flow__edge-textbg { fill: var(--t-bg); }
 .tree-canvas { touch-action: none; }
-/* 長按後拖曳中的卡片 */
+/* 卡片要能長按拖曳:關掉 iOS 長按預覽 / 文字選取,否則系統選單會蓋住畫面 */
+.tree-canvas .react-flow__node { -webkit-touch-callout: none; -webkit-user-select: none; user-select: none; }
+.tree-canvas .react-flow__node img { -webkit-touch-callout: none; pointer-events: none; }
+/* 長按後拖曳中的卡片(用 filter 而不是 box-shadow,才不會蓋掉 ring) */
 .react-flow__node.person-dragging { z-index: 20 !important; }
-.react-flow__node.person-dragging > .card { transform: scale(1.04); box-shadow: 0 12px 28px -8px rgb(0 0 0 / 0.35); }
+.react-flow__node.person-dragging > .card { filter: drop-shadow(0 12px 16px rgb(0 0 0 / 0.3)); }
 
 @layer components {
   .card { @apply rounded-2xl bg-surface shadow-sm ring-1 ring-line; }

@@ -7,7 +7,7 @@ import PersonPicker from '../components/PersonPicker.jsx'
 import Avatar from '../components/Avatar.jsx'
 import { parseBirth } from '../lib/kinship/birth.js'
 import { isActiveSpouse } from '../lib/kinship/graph.js'
-import { SPOUSE_STATUS_LABEL, parseList, toPartialDate } from '../lib/format.js'
+import { SPOUSE_STATUS_LABEL, birthOrderLabel, parseList, toPartialDate } from '../lib/format.js'
 
 const REL = [
   { id: 'parent', label: '父母', desc: '新成員是這個人的爸爸 / 媽媽' },
@@ -35,6 +35,7 @@ export default function PersonForm() {
   const [month, setMonth] = useState('')
   const [day, setDay] = useState('')
   const [deceased, setDeceased] = useState(false)
+  const [birthOrder, setBirthOrder] = useState('')
   const [avatar, setAvatar] = useState(null)
   const [note, setNote] = useState('')
 
@@ -57,6 +58,7 @@ export default function PersonForm() {
       setMonth(b?.m ? String(b.m) : '')
       setDay(b?.d ? String(b.d) : '')
       setDeceased(Boolean(editing.is_deceased))
+      setBirthOrder(editing.birth_order ? String(editing.birth_order) : '')
       setAvatar(editing.avatar_url || null)
       setNote(editing.note || '')
     }
@@ -95,6 +97,7 @@ export default function PersonForm() {
       tags: parseList(tags),
       gender,
       birth_date: toPartialDate(year, month, day),
+      birth_order: birthOrder ? Number(birthOrder) : null,
       is_deceased: deceased,
       avatar_url: avatar,
       note: note.trim(),
@@ -286,6 +289,15 @@ export default function PersonForm() {
             </select>
           </div>
           <p className="mt-1 text-xs text-muted">生日用來判斷長幼(哥哥 / 弟弟、伯伯 / 叔叔…),沒填時會以中性詞代替。</p>
+        </div>
+        <div>
+          <label className="label">排行(在兄弟姊妹中是老幾)</label>
+          <div className="flex items-center gap-2">
+            <span className="text-sm text-muted">老</span>
+            <input type="number" inputMode="numeric" min="1" max="99" value={birthOrder} onChange={(e) => setBirthOrder(e.target.value)} placeholder="例如 2" className="input w-24" />
+            {birthOrder && <span className="text-sm text-ink">{birthOrderLabel(Number(birthOrder))}</span>}
+          </div>
+          <p className="mt-1 text-xs text-muted">不知道實際生日時,填排行(1 = 老大)也能正確判斷哥哥 / 弟弟、伯伯 / 叔叔。同時有生日時以生日為準。</p>
         </div>
         <label className="flex items-center gap-2 text-sm text-ink">
           <input type="checkbox" checked={deceased} onChange={(e) => setDeceased(e.target.checked)} className="h-4 w-4 accent-primary" />

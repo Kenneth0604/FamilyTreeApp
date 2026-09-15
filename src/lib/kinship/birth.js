@@ -28,6 +28,20 @@ export function compareAge(a, b) {
   return 0
 }
 
+/**
+ * 比較兩個「兄弟姊妹」誰年長:先看生日,生日分不出來(缺、或只有年份且同年)再看排行(birth_order,1 = 老大)。
+ * 排行只在同一組兄弟姊妹之間有意義,堂表之間請用 compareAge。
+ * @returns {1|-1|0}
+ */
+export function compareSiblings(a, b) {
+  const c = compareAge(a, b)
+  if (c) return c
+  const oa = a?.birth_order
+  const ob = b?.birth_order
+  if (Number.isFinite(oa) && Number.isFinite(ob) && oa !== ob) return oa < ob ? 1 : -1
+  return 0
+}
+
 /** 由生日算年齡(只有年份時為概略值)。回傳 { age, approx } 或 null */
 export function ageFromBirth(value, now = new Date()) {
   const b = parseBirth(value)

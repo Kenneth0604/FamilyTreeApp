@@ -6,7 +6,7 @@
 --   families        家族群組
 --   family_codes    每個家族兩種邀請碼:invite_code 加入後可編輯、view_code 加入後只能查看(只有 editor 讀得到)
 --   family_members  「某個登入帳號在某個家族中的身分」(role editor / viewer、self / viewpoint / 進階模式)
---   people          家族樹上的每一個人(大多數沒有帳號;nicknames 小名、tags 自訂標籤、stats 遊戲式屬性分數、power 戰力 / 家庭地位)
+--   people          家族樹上的每一個人(大多數沒有帳號;nicknames 小名、tags 自訂標籤、birth_order 排行、stats 遊戲式屬性分數、power 戰力 / 家庭地位)
 --   person_entries  生平紀事:每人多筆履歷式條列(職業 / 學歷 / 事蹟 / 健康疾病 / 居住地 / 榮譽 / 其他),含起迄時間
 --   parent_child    親子邊(有方向)
 --   spouses         配偶 / 伴侶邊(無方向;married / widowed / partner 未婚伴侶 / divorced / ex_partner 前伴侶)
@@ -111,6 +111,8 @@ alter table public.people add column if not exists nicknames text[] not null def
 alter table public.people add column if not exists tags text[] not null default '{}';
 -- 遊戲角色式屬性:{ 屬性 id: 0..10 },沒評的不放
 alter table public.people add column if not exists stats jsonb not null default '{}'::jsonb;
+-- 兄弟姊妹排行(1 = 老大);不知道實際年齡時用來判斷長幼
+alter table public.people add column if not exists birth_order smallint check (birth_order is null or birth_order between 1 and 99);
 -- 戰力(家庭地位)0..10,預設 5;數字越大樹狀圖卡片越大
 alter table public.people add column if not exists power smallint not null default 5 check (power between 0 and 10);
 

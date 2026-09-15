@@ -14,7 +14,7 @@
  * 的原子步驟,依 code(例如 'UUD' = 父母的兄弟姊妹)查對照規則。
  */
 import { bfs, pathFromBfs, generationOfPath } from './graph.js'
-import { compareAge } from './birth.js'
+import { compareAge, compareSiblings } from './birth.js'
 
 const G = (p) => (p?.gender === 'male' ? 'm' : p?.gender === 'female' ? 'f' : 'u')
 
@@ -34,11 +34,12 @@ function byGender(p, m, f, u) {
  * @param target 要稱呼的人
  * @param ref    比較基準(自己、配偶、父母…)
  * @param n      { mOld, mYoung, fOld, fYoung, mAny, fAny, any }
+ * @param cmp    比較函式:兄弟姊妹用 compareSiblings(可用排行),堂表等非同胞用 compareAge
  */
-function elderTerm(target, ref, n) {
+function elderTerm(target, ref, n, cmp = compareSiblings) {
   const g = G(target)
   if (g === 'u') return approx(n.any)
-  const c = compareAge(target, ref)
+  const c = cmp(target, ref)
   if (c === 0) return approx(g === 'm' ? n.mAny : n.fAny, true)
   if (g === 'm') return exact(c > 0 ? n.mOld : n.mYoung)
   return exact(c > 0 ? n.fOld : n.fYoung)
@@ -128,7 +129,7 @@ function lookup(code, P, opts) {
       if (gp === 'm') {
         const gt = G(T)
         if (gt === 'm') {
-          const c = compareAge(T, par)
+          const c = compareSiblings(T, par)
           if (c === 0) return approx('叔伯', true)
           return exact(c > 0 ? '伯伯' : '叔叔')
         }
@@ -149,12 +150,12 @@ function lookup(code, P, opts) {
       const gs = G(sib)
       const gt = G(T)
       if (gs === 'm' && gt === 'f') {
-        const c = compareAge(sib, V)
+        const c = compareSiblings(sib, V)
         if (c === 0) return approx('兄弟的太太', true)
         return exact(c > 0 ? '嫂嫂' : '弟媳')
       }
       if (gs === 'f' && gt === 'm') {
-        const c = compareAge(sib, V)
+        const c = compareSiblings(sib, V)
         if (c === 0) return approx('姊妹的先生', true)
         return exact(c > 0 ? '姊夫' : '妹夫')
       }
@@ -204,7 +205,7 @@ function lookup(code, P, opts) {
 
     // ---------------------------------------------------------------- 四步
     case 'UUDD':
-      return elderTerm(T, V, siblingNames(cousinPrefix(P[1], P[3])))
+      return elderTerm(T, V, siblingNames(cousinPrefix(P[1], P[3])), compareAge)
     case 'UUDS': {
       const par = P[1]
       const unc = P[3]
@@ -213,7 +214,7 @@ function lookup(code, P, opts) {
       const gt = G(T)
       if (gp === 'm') {
         if (gu === 'm' && gt === 'f') {
-          const c = compareAge(unc, par)
+          const c = compareSiblings(unc, par)
           if (c === 0) return approx('叔伯的太太', true)
           return exact(c > 0 ? '伯母' : '嬸嬸')
         }
@@ -234,7 +235,7 @@ function lookup(code, P, opts) {
       const gt = G(T)
       if (g === 'm') {
         if (gt === 'm') {
-          const c = compareAge(T, gp)
+          const c = compareSiblings(T, gp)
           if (c === 0) return approx('伯公/叔公', true)
           return exact(c > 0 ? '伯公' : '叔公')
         }
@@ -329,7 +330,7 @@ function lookup(code, P, opts) {
       const gt = G(T)
       if (G(gp) === 'm') {
         if (G(gu) === 'm' && gt === 'f') {
-          const c = compareAge(gu, gp)
+          const c = compareSiblings(gu, gp)
           if (c === 0) return approx('伯婆/嬸婆', true)
           return exact(c > 0 ? '伯婆' : '嬸婆')
         }
@@ -346,7 +347,7 @@ function lookup(code, P, opts) {
       if (!adv) return null
       // P = [V, 父母, 祖父母, 曾祖父母, 祖父母的兄弟姊妹, 父母的堂表兄弟姊妹, T]
       const pure = G(P[1]) === 'm' && G(P[2]) === 'm' && G(P[4]) === 'm' && G(P[5]) === 'm'
-      return elderTerm(T, V, siblingNames(pure ? '再堂' : '再表'))
+      return elderTerm(T, V, siblingNames(pure ? '再堂' : '再表'), compareAge)
     }
     default:
       return null

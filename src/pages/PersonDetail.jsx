@@ -7,9 +7,9 @@ import TermBadge from '../components/TermBadge.jsx'
 import PersonPicker from '../components/PersonPicker.jsx'
 import LifeEntries from '../components/LifeEntries.jsx'
 import StatsPanel from '../components/StatsPanel.jsx'
-import { ageLabel, birthLabel, GENDER_LABEL, SPOUSE_STATUS_LABEL, relativeTime } from '../lib/format.js'
+import { ageLabel, birthLabel, birthOrderLabel, GENDER_LABEL, SPOUSE_STATUS_LABEL, relativeTime } from '../lib/format.js'
 import { computeRelationTerm } from '../lib/kinship/index.js'
-import { compareAge } from '../lib/kinship/birth.js'
+import { compareSiblings } from '../lib/kinship/birth.js'
 
 export default function PersonDetail() {
   const { id } = useParams()
@@ -29,7 +29,7 @@ export default function PersonDetail() {
   const siblings = useMemo(() => {
     const set = new Set()
     for (const p of graph.parentsOf.get(id) || []) for (const c of graph.childrenOf.get(p) || []) if (c !== id) set.add(c)
-    return [...set].sort((a, b) => -compareAge(peopleById.get(a), peopleById.get(b)))
+    return [...set].sort((a, b) => -compareSiblings(peopleById.get(a), peopleById.get(b)))
   }, [graph, id, peopleById])
 
   // 從這個人的角度看其他人(在詳細頁列關係時很直觀)
@@ -120,6 +120,12 @@ export default function PersonDetail() {
                 {birthLabel(person) || <span className="text-muted/70">未填</span>}
                 {ageLabel(person) && !person.is_deceased && <span className="ml-2 text-muted">{ageLabel(person)}</span>}
               </dd>
+              {person.birth_order && (
+                <>
+                  <dt className="text-muted">排行</dt>
+                  <dd className="text-ink">{birthOrderLabel(person.birth_order)}</dd>
+                </>
+              )}
             </dl>
           </div>
         </div>
@@ -207,7 +213,7 @@ export default function PersonDetail() {
           empty="尚無子女紀錄"
           items={children
             .map((r) => ({ key: r.id, pid: r.child_id, onRemove: canEdit ? () => guard(() => store.removeParentChild(r.id), '已移除') : null }))
-            .sort((a, b) => -compareAge(peopleById.get(a.pid), peopleById.get(b.pid)))}
+            .sort((a, b) => -compareSiblings(peopleById.get(a.pid), peopleById.get(b.pid)))}
           fromHere={fromHere}
           peopleById={peopleById}
           busy={busy}
@@ -290,6 +296,7 @@ function RelationGroup({ title, hint, empty, items, fromHere, peopleById, busy, 
               <Link to={`/people/${it.pid}`} className="flex min-w-0 flex-1 items-center gap-2 rounded-xl py-1 active:bg-surface-2">
                 <Avatar person={p} size="sm" />
                 <span className="truncate text-sm text-ink">{p?.name ?? '(已刪除)'}</span>
+                {p?.birth_order && <span className="shrink-0 text-[11px] text-muted">{birthOrderLabel(p.birth_order)}</span>}
                 <TermBadge result={fromHere(it.pid)} />
               </Link>
               {it.extra}

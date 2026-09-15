@@ -17,6 +17,13 @@ export function birthLabel(person) {
   return formatBirth(person?.birth_date)
 }
 
+const CN_NUM = ['', '大', '二', '三', '四', '五', '六', '七', '八', '九', '十']
+/** 排行:1 → 老大、2 → 老二 … 10 → 老十,更多則「第 N」;沒填回空字串 */
+export function birthOrderLabel(n) {
+  if (!Number.isFinite(n) || n < 1) return ''
+  return n <= 10 ? `老${CN_NUM[n]}` : `第 ${n}`
+}
+
 /** 年 / 月 / 日(可缺後段)→ 'YYYY' / 'YYYY-MM' / 'YYYY-MM-DD';沒有年回 null */
 export function toPartialDate(y, m, d) {
   if (!y) return null

@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest'
 import { buildGraph, computeRelationTerm, computeAllRelationTerms, shortestPath } from './index.js'
-import { compareAge, ageFromBirth, parseBirth } from './birth.js'
+import { compareAge, compareSiblings, ageFromBirth, parseBirth } from './birth.js'
 
 /**
  * Fixture 建構器:
@@ -636,6 +636,28 @@ describe('Fallback 組合式描述與邊界情況', () => {
     g.parent(hDad, husband)
     expect(g.term(me, husband)).toBe('先生')
     expect(g.term(me, hDad)).toBe('公公')
+  })
+  it('compareSiblings:生日優先,分不出來再看排行', () => {
+    expect(compareSiblings({ birth_order: 1 }, { birth_order: 2 })).toBe(1)
+    expect(compareSiblings({ birth_date: '1990', birth_order: 1 }, { birth_date: '1990', birth_order: 3 })).toBe(1)
+    expect(compareSiblings({ birth_date: '1995', birth_order: 1 }, { birth_date: '1990', birth_order: 2 })).toBe(-1) // 生日為準
+    expect(compareSiblings({ birth_order: 2 }, {})).toBe(0)
+  })
+  it('沒有生日但有排行:仍能分出哥哥 / 弟弟、伯伯 / 叔叔', () => {
+    const g = fixture()
+    const gp = g.person('阿公', 'male')
+    const dad = g.person('爸', 'male', null, { birth_order: 2 })
+    const uncleOld = g.person('大伯', 'male', null, { birth_order: 1 })
+    const uncleYoung = g.person('小叔', 'male', null, { birth_order: 3 })
+    g.parents(gp, null, uncleOld, dad, uncleYoung)
+    const me = g.person('我', 'male', null, { birth_order: 1 })
+    const bro = g.person('弟', 'male', null, { birth_order: 2 })
+    g.parents(dad, null, me, bro)
+    expect(g.term(me, bro)).toBe('弟弟')
+    expect(g.term(bro, me)).toBe('哥哥')
+    expect(g.result(me, bro).needsBirthday).toBe(false)
+    expect(g.term(me, uncleOld)).toBe('伯伯')
+    expect(g.term(me, uncleYoung)).toBe('叔叔')
   })
   it('未婚伴侶叫「伴侶」而非先生 / 太太,但姻親路徑仍可走', () => {
     const g = fixture()

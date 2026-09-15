@@ -84,7 +84,7 @@ npm test
 | --- | --- |
 | `families` | id, name, invite_code(唯一、可重新產生) |
 | `family_members` | 帳號 × 家族的身分:display_name、self_person_id、viewpoint_person_id、advanced_terms |
-| `people` | name、nicknames(text[])、tags(text[])、gender(male / female / unspecified)、birth_date(文字,`YYYY` / `YYYY-MM` / `YYYY-MM-DD` 或 null)、is_deceased、avatar_url、note、stats(jsonb,{屬性 id: 0–10})、power(0–10 戰力)、created_by / updated_by / updated_at |
+| `people` | name、nicknames(text[])、tags(text[])、gender(male / female / unspecified)、birth_date(文字,`YYYY` / `YYYY-MM` / `YYYY-MM-DD` 或 null)、birth_order(排行,1 = 老大;生日分不出長幼時用)、is_deceased、avatar_url、note、stats(jsonb,{屬性 id: 0–10})、power(0–10 戰力)、created_by / updated_by / updated_at |
 | `parent_child` | parent_id → child_id |
 | `spouses` | person_a_id、person_b_id、status(married / widowed / partner 未婚伴侶 / divorced / ex_partner 前伴侶);已結束的關係(divorced / ex_partner)稱謂推算不走、樹狀圖不並排,但仍可有共同子女 |
 | `person_entries` | 生平紀事:person_id、category(career / education / event / health / residence / award / other)、title、detail、start_date / end_date(同 birth_date 格式)、ongoing |

@@ -16,7 +16,7 @@ export default function Avatar({ person, size = 'md', className = '', ring = fal
     <div
       className={`relative shrink-0 overflow-hidden rounded-full ${SIZE[size]} ${tone} ${deceased} ${ring ? 'ring-2 ring-primary ring-offset-2 ring-offset-surface' : ''} ${className} flex items-center justify-center font-bold`}
     >
-      {person?.avatar_url ? <img src={person.avatar_url} alt="" className="h-full w-full object-cover" loading="lazy" /> : <span>{initial(person?.name)}</span>}
+      {person?.avatar_url ? <img src={person.avatar_url} alt="" className="h-full w-full object-cover" loading="lazy" draggable={false} /> : <span>{initial(person?.name)}</span>}
     </div>
   )
 }

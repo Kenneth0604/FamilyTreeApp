@@ -7,7 +7,7 @@
  *
  * 不引入圖形排版庫,足以應付一般家族(數十到百餘人)。
  */
-import { compareAge } from './kinship/birth.js'
+import { compareSiblings } from './kinship/birth.js'
 import { isActiveSpouse } from './kinship/graph.js'
 
 export const NODE_W = 132
@@ -47,7 +47,8 @@ export function layoutTree(graph, terms, viewpointId) {
   // ---- 2. 每層排序 ----
   const order = new Map() // id → x index(浮點)
   const spouseOf = (id) => (graph.spousesOf.get(id) || []).filter((s) => isActiveSpouse(s.status)).map((s) => s.id)
-  const byBirth = (a, b) => -compareAge(graph.persons.get(a), graph.persons.get(b)) || String(a).localeCompare(String(b))
+  // 同一組父母底下的孩子依長幼排(生日,再看排行)
+  const byBirth = (a, b) => -compareSiblings(graph.persons.get(a), graph.persons.get(b)) || String(a).localeCompare(String(b))
 
   for (const g of rowKeys) {
     const rowIds = rowsMap.get(g)

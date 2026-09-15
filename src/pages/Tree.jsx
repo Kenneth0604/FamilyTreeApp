@@ -5,7 +5,7 @@ import { useStore } from '../lib/store.jsx'
 import { layoutTree, NODE_W, NODE_H } from '../lib/treeLayout.js'
 import Avatar from '../components/Avatar.jsx'
 import TermBadge from '../components/TermBadge.jsx'
-import { ageLabel, powerScale, POWER_DEFAULT } from '../lib/format.js'
+import { ageLabel, birthOrderLabel, powerScale, POWER_DEFAULT } from '../lib/format.js'
 
 const LONG_PRESS_MS = 350
 const MOVE_TOLERANCE = 8 // 長按前手指移動超過這個距離就當作是在平移畫布
@@ -87,7 +87,8 @@ const PersonNode = memo(function PersonNode({ id, data }) {
       onPointerMove={onPointerMove}
       onPointerUp={onPointerEnd}
       onPointerCancel={onPointerEnd}
-      className={`card relative flex flex-col items-center gap-1.5 px-2 py-3 text-center transition-[transform,box-shadow] ${isViewpoint ? 'ring-2 ring-primary' : ''} ${person.is_deceased ? 'opacity-80' : ''}`}
+      onContextMenu={(e) => e.preventDefault()} // 手機長按會跳出圖片 / 文字的系統選單,蓋住整個畫面
+      className={`card relative flex select-none flex-col items-center gap-1.5 px-2 py-3 text-center transition-[transform,filter] ${isViewpoint ? 'ring-2 ring-primary' : ''} ${person.is_deceased ? 'opacity-80' : ''}`}
       style={{ width: NODE_W, height: NODE_H, transform: `scale(${scale})`, transformOrigin: 'top left' }}
     >
       {power !== POWER_DEFAULT && (
@@ -109,7 +110,7 @@ const PersonNode = memo(function PersonNode({ id, data }) {
         {isSelf && <span className="term term-self">我</span>}
         {term ? <TermBadge result={term} className="max-w-full truncate" /> : <span className="term term-none">未連結</span>}
       </div>
-      <div className="text-[11px] text-muted">{ageLabel(person)}</div>
+      <div className="text-[11px] text-muted">{[ageLabel(person), birthOrderLabel(person.birth_order)].filter(Boolean).join(' · ')}</div>
     </div>
   )
 })
@@ -198,10 +199,13 @@ function TreeCanvas() {
   positionsRef.current = positions
 
   const onDragStart = useCallback((id) => setDraggingId(id), [])
+  // pointermove 是連續事件,React 可能把好幾次更新排在同一次 render 前,所以要從 prev 累加而不是從畫面上的位置算
   const onDrag = useCallback((id, dx, dy) => {
-    const cur = positionsRef.current.get(id)
-    if (!cur) return
-    setOverrides((prev) => new Map(prev).set(id, { x: cur.x + dx, y: cur.y + dy }))
+    setOverrides((prev) => {
+      const cur = prev.get(id) || positionsRef.current.get(id)
+      if (!cur) return prev
+      return new Map(prev).set(id, { x: cur.x + dx, y: cur.y + dy })
+    })
   }, [])
   const onDragEnd = useCallback(() => {
     setDraggingId(null)
