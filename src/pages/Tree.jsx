@@ -10,64 +10,14 @@ import { ageLabel, birthOrderLabel, POWER_DEFAULT, STATS, VIEW_MODES, viewPresen
 
 /**
  * 樹狀圖節點:大頭照 / 姓名(小名)/ 相對於 viewpoint 的稱謂
- * 「編輯排版」模式:先點一下卡片選取,選取中的卡片按住就能拖曳;其他情況滑動都是平移畫布。
- * React Flow 內建拖曳一按就動、會吃掉平移,所以自己處理指標事件。
+ * 拖曳交給 React Flow 內建機制(iOS Safari 上經過實戰):只有「編輯排版」模式下被選取的那張卡片 draggable,
+ * 其他卡片與背景照常平移畫布。
  */
-const PersonNode = memo(function PersonNode({ id, data }) {
-  const { person, term, isViewpoint, isSelf, scale, badge, badgeStrong, tint, layoutMode, selected, onDragStart, onDrag, onDragEnd } = data
-  const { getZoom } = useReactFlow()
-  const ref = useRef(null)
-  const st = useRef(null) // 拖曳中:{ pointerId, x, y }
-
-  // 觸控:拖曳中的 touchmove 不能冒泡到畫布(d3-zoom 掛在畫布上,否則卡片和畫布會一起動)。React 的 touch 事件是 passive 且掛在 root,所以用原生監聽
-  useEffect(() => {
-    const el = ref.current
-    if (!el) return
-    const block = (e) => {
-      if (st.current) {
-        e.stopPropagation()
-        e.preventDefault()
-      }
-    }
-    el.addEventListener('touchmove', block, { passive: false })
-    return () => el.removeEventListener('touchmove', block)
-  }, [])
-
-  const onPointerDown = (e) => {
-    if (!layoutMode || !selected) return // 沒選取的卡片:交給畫布平移 / 點擊選取
-    if (!e.isPrimary || (e.pointerType === 'mouse' && e.button !== 0)) return
-    try {
-      e.currentTarget.setPointerCapture(e.pointerId)
-    } catch {
-      /* ignore */
-    }
-    // 滑鼠:d3-zoom 的平移手勢掛在 window 的 mousemove / mouseup 上,送一個 mouseup 結束它
-    if (e.pointerType === 'mouse') window.dispatchEvent(new MouseEvent('mouseup', { bubbles: true, clientX: e.clientX, clientY: e.clientY, view: window }))
-    st.current = { pointerId: e.pointerId, x: e.clientX, y: e.clientY }
-    onDragStart(id)
-  }
-  const onPointerMove = (e) => {
-    const s = st.current
-    if (!s || e.pointerId !== s.pointerId) return
-    const z = getZoom() || 1
-    onDrag(id, (e.clientX - s.x) / z, (e.clientY - s.y) / z)
-    s.x = e.clientX
-    s.y = e.clientY
-  }
-  const onPointerEnd = (e) => {
-    const s = st.current
-    if (!s || e.pointerId !== s.pointerId) return
-    st.current = null
-    onDragEnd(id)
-  }
+const PersonNode = memo(function PersonNode({ data }) {
+  const { person, term, isViewpoint, isSelf, scale, badge, badgeStrong, tint } = data
 
   return (
     <div
-      ref={ref}
-      onPointerDown={onPointerDown}
-      onPointerMove={onPointerMove}
-      onPointerUp={onPointerEnd}
-      onPointerCancel={onPointerEnd}
       onContextMenu={(e) => e.preventDefault()} // 手機長按會跳出圖片 / 文字的系統選單,蓋住整個畫面
       className={`card relative flex select-none flex-col items-center gap-1.5 px-2 py-3 text-center transition-[transform,filter] ${isViewpoint ? 'ring-2 ring-primary' : ''} ${person.is_deceased ? 'opacity-80' : ''}`}
       style={{ width: NODE_W, height: NODE_H, transform: `scale(${scale})`, transformOrigin: 'top left' }}
@@ -201,22 +151,6 @@ function TreeCanvas() {
     for (const [id, p] of overrides) if (out.has(id)) out.set(id, p)
     return out
   }, [layout, overrides])
-  const positionsRef = useRef(positions)
-  positionsRef.current = positions
-
-  const onDragStart = useCallback((id) => setDraggingId(id), [])
-  // pointermove 是連續事件,React 可能把好幾次更新排在同一次 render 前,所以要從 prev 累加而不是從畫面上的位置算
-  const onDrag = useCallback((id, dx, dy) => {
-    setOverrides((prev) => {
-      const cur = prev.get(id) || positionsRef.current.get(id)
-      if (!cur) return prev
-      return new Map(prev).set(id, { x: cur.x + dx, y: cur.y + dy })
-    })
-  }, [])
-  const onDragEnd = useCallback(() => {
-    setDraggingId(null)
-    suppressClickUntil.current = Date.now() + 400 // 放開時瀏覽器還會補一個 click,不要當成開詳細頁
-  }, [])
   const resetLayout = () => setOverrides(new Map())
 
   // ---- 連接點:同一對父母(或單親)先匯合成一個點,再從那個點分岔給各個孩子 ----
@@ -274,6 +208,32 @@ function TreeCanvas() {
     [people, positions, view],
   )
 
+  // React Flow 拖曳回報的是節點左上角;卡片依顯示方式縮放後是置中在排版格子裡的,換算回格子位置再存
+  const cardsRef = useRef(cards)
+  cardsRef.current = cards
+  const applyDragPosition = useCallback((id, position) => {
+    const c = cardsRef.current.find((x) => x.p.id === id)
+    if (!c || !position) return
+    const slot = { x: position.x - (NODE_W - c.w) / 2, y: position.y - (NODE_H - c.h) / 2 }
+    setOverrides((prev) => new Map(prev).set(id, slot))
+  }, [])
+  // 受控模式:React Flow 把位置變更丟回來,我們寫進 overrides 再由 nodes 重新算出位置
+  const onNodesChange = useCallback(
+    (changes) => {
+      for (const ch of changes) if (ch.type === 'position' && ch.position) applyDragPosition(ch.id, ch.position)
+    },
+    [applyDragPosition],
+  )
+  const onNodeDragStart = useCallback((_e, node) => setDraggingId(node.id), [])
+  const onNodeDragStop = useCallback(
+    (_e, node) => {
+      applyDragPosition(node.id, node.position)
+      setDraggingId(null)
+      suppressClickUntil.current = Date.now() + 400 // 放開時瀏覽器還會補一個 click,不要當成點擊
+    },
+    [applyDragPosition],
+  )
+
   const householdNodes = useMemo(() => {
     const byId = new Map(cards.map((c) => [c.p.id, c]))
     return households
@@ -311,9 +271,8 @@ function TreeCanvas() {
         data: {
           person: c.p, term: terms.get(c.p.id) ?? null, isViewpoint: c.p.id === viewpointId, isSelf: c.p.id === selfId,
           scale: c.s, badge: c.badge, badgeStrong: c.badgeStrong, tint: c.tint,
-          layoutMode, selected: layoutMode && selectedId === c.p.id, onDragStart, onDrag, onDragEnd,
         },
-        draggable: false,
+        draggable: layoutMode && selectedId === c.p.id, // 只有選取中的卡片能拖,其他卡片按著滑仍是平移
         selectable: false,
       })),
       ...[...junctions.values()].map((j) => ({
@@ -325,7 +284,7 @@ function TreeCanvas() {
         selectable: false,
       })),
     ],
-    [cards, householdNodes, terms, viewpointId, selfId, junctions, draggingId, layoutMode, selectedId, onDragStart, onDrag, onDragEnd],
+    [cards, householdNodes, terms, viewpointId, selfId, junctions, draggingId, layoutMode, selectedId],
   )
 
   const edges = useMemo(() => {
@@ -414,7 +373,11 @@ function TreeCanvas() {
         edgeTypes={edgeTypes}
         onNodeClick={onNodeClick}
         onPaneClick={onPaneClick}
-        nodesDraggable={false}
+        onNodesChange={onNodesChange}
+        onNodeDragStart={onNodeDragStart}
+        onNodeDragStop={onNodeDragStop}
+        nodesDraggable={layoutMode}
+        nodeDragThreshold={4}
         nodesConnectable={false}
         elementsSelectable={false}
         panOnScroll
