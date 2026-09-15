@@ -60,6 +60,12 @@
   --t-female-soft: #fce7f3;
   --t-hero-from: #e86aa8;
   --t-hero-to: #a78bfa;
+  /* 樹狀圖血管連線:玫瑰血色(介於 primary 與 danger 之間)、流動高光、伴侶(偏紫)、已結束(乾枯) */
+  --t-vessel: #d9738f;
+  --t-vessel-flow: #fff1f5;
+  --t-vessel-partner: #b79ae8;
+  --t-vessel-ended: #d9c4cf;
+  --t-vessel-ended-line: #c4a7b6;
 }
 
 /* 黑黑:黑灰色系 */
@@ -90,6 +96,11 @@
   --t-female-soft: #45202a;
   --t-hero-from: #3a3f48;
   --t-hero-to: #1b1e23;
+  --t-vessel: #a95a72;
+  --t-vessel-flow: #ffc2d3;
+  --t-vessel-partner: #8a80a8;
+  --t-vessel-ended: #4a4f58;
+  --t-vessel-ended-line: #6b7280;
 }
 
 /* ------------------------------------------------------------------
@@ -162,13 +173,41 @@ input[type="date"], input[type="number"] {
 .react-flow__controls-button:hover { background: var(--t-surface-2); }
 .react-flow__minimap { background: var(--t-surface); }
 .react-flow__handle { opacity: 0; pointer-events: none; }
-.react-flow__edge-path { stroke: var(--t-muted); stroke-width: 1.6; }
-.react-flow__edge.spouse-edge .react-flow__edge-path { stroke: var(--t-primary); stroke-dasharray: 4 3; }
-.react-flow__edge.divorced-edge .react-flow__edge-path { stroke: var(--t-line); stroke-dasharray: 2 4; }
-.react-flow__edge.partner-edge .react-flow__edge-path { stroke: var(--t-accent); stroke-dasharray: 1.5 3; }
-.react-flow__edge.ex-partner-edge .react-flow__edge-path { stroke: var(--t-accent); stroke-dasharray: 1.5 6; opacity: 0.6; }
-.react-flow__edge-text { font-size: 10px; fill: var(--t-muted); }
-.react-flow__edge-textbg { fill: var(--t-bg); }
+/* ---- 血管連線(src/components/VesselEdge.jsx)----
+   body = 封閉形狀填色;flow = 被血管形狀裁切的粗虛線,動 stroke-dashoffset 就會沿路徑流動(父母 → 孩子)。
+   只用 path + clipPath + CSS keyframes,手機瀏覽器都吃,零 JS 逐幀。 */
+.vessel-body { fill: var(--t-vessel); }
+.vessel-flow {
+  fill: none;
+  stroke: var(--t-vessel-flow);
+  stroke-width: 14; /* 蓋過最寬的管徑,實際形狀由 clipPath 決定 */
+  stroke-dasharray: 6 14;
+  stroke-linecap: butt;
+  opacity: 0.6;
+  animation: vessel-flow 1.4s linear infinite;
+}
+@keyframes vessel-flow { to { stroke-dashoffset: -20; } } /* 一個週期 = dasharray 總長,才能無縫循環 */
+/* 配偶沒有血緣:靜態血管。伴侶偏紫、稍細;離婚 / 前伴侶淡化 + 虛線外框,像乾掉的空管 */
+.vessel-spouse .vessel-body { opacity: 0.85; }
+.vessel-partner .vessel-body { fill: var(--t-vessel-partner); }
+.vessel-divorced .vessel-body { fill: var(--t-vessel-ended); opacity: 0.4; }
+.vessel-ex_partner .vessel-body { fill: var(--t-vessel-ended); opacity: 0.28; }
+.vessel-outline { fill: none; stroke: var(--t-vessel-ended-line); stroke-width: 1; stroke-dasharray: 3 3; }
+.vessel-label {
+  position: absolute;
+  pointer-events: none;
+  white-space: nowrap;
+  font-size: 10px;
+  line-height: 1;
+  padding: 3px 7px;
+  border-radius: 999px;
+  background: var(--t-surface);
+  color: var(--t-muted);
+  box-shadow: 0 0 0 1px var(--t-line);
+}
+@media (prefers-reduced-motion: reduce) {
+  .vessel-flow { animation: none; opacity: 0.3; }
+}
 .tree-canvas { touch-action: none; }
 /* 卡片要能長按拖曳:關掉 iOS 長按預覽 / 文字選取,否則系統選單會蓋住畫面 */
 .tree-canvas .react-flow__node { -webkit-touch-callout: none; -webkit-user-select: none; user-select: none; }

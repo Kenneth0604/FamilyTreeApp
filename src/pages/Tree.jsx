@@ -1,10 +1,11 @@
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
-import { ReactFlow, Background, Controls, Handle, Position, BaseEdge, useReactFlow, ReactFlowProvider } from '@xyflow/react'
+import { ReactFlow, Background, Controls, Handle, Position, useReactFlow, ReactFlowProvider } from '@xyflow/react'
 import { useStore } from '../lib/store.jsx'
 import { layoutTree, NODE_W, NODE_H } from '../lib/treeLayout.js'
 import Avatar from '../components/Avatar.jsx'
 import TermBadge from '../components/TermBadge.jsx'
+import VesselEdge from '../components/VesselEdge.jsx'
 import { ageLabel, birthOrderLabel, powerScale, POWER_DEFAULT } from '../lib/format.js'
 
 const LONG_PRESS_MS = 350
@@ -115,12 +116,15 @@ const PersonNode = memo(function PersonNode({ id, data }) {
   )
 })
 
-/** 世代連接點:同一對父母(或單親)匯合成一個點,再往下分岔給各個孩子。兩個 handle 都放正中央,進出的線才會接在同一點 */
+/**
+ * 世代連接點:同一對父母(或單親)的血管在這裡匯流,再分岔給各個孩子。
+ * 畫成血管色的小圓球,蓋住細管接縫;兩個 handle 都放正中央,進出的線才會接在同一點
+ */
 const JUNCTION_SIZE = 8
 const centerHandle = { top: '50%', bottom: 'auto', left: '50%', transform: 'translate(-50%, -50%)', width: 1, height: 1, minWidth: 0, minHeight: 0, opacity: 0 }
 const JunctionNode = memo(function JunctionNode() {
   return (
-    <div className="rounded-full bg-line" style={{ width: JUNCTION_SIZE, height: JUNCTION_SIZE }}>
+    <div className="rounded-full" style={{ width: JUNCTION_SIZE, height: JUNCTION_SIZE, background: 'var(--t-vessel)' }}>
       <Handle type="target" position={Position.Top} id="top" style={centerHandle} />
       <Handle type="source" position={Position.Bottom} id="bottom" style={centerHandle} />
     </div>
@@ -128,26 +132,10 @@ const JunctionNode = memo(function JunctionNode() {
 })
 
 const nodeTypes = { person: PersonNode, junction: JunctionNode }
+const edgeTypes = { vessel: VesselEdge }
 
-/**
- * 直角「匝道」連線:只有一個轉折,不用 smoothstep 那種在中途多繞一段的彎。
- * bend = 'target':先垂直到目標高度再水平(父母 → 連接點,形成連接點高度的一條橫桿)
- * bend = 'source':先水平再垂直(連接點 → 孩子,沿橫桿到孩子正上方再直直下去)
- */
-function BusEdge({ sourceX, sourceY, targetX, targetY, data, style, markerEnd }) {
-  const d = data?.bend === 'source' ? `M ${sourceX} ${sourceY} H ${targetX} V ${targetY}` : `M ${sourceX} ${sourceY} V ${targetY} H ${targetX}`
-  return <BaseEdge path={d} style={style} markerEnd={markerEnd} />
-}
-const edgeTypes = { bus: BusEdge }
-
-/** 配偶 / 伴侶連線:婚姻是主色虛線;未婚伴侶、已結束的關係各用不同線型並標上文字 */
-const SPOUSE_EDGE = {
-  married: { className: 'spouse-edge' },
-  widowed: { className: 'spouse-edge' },
-  partner: { className: 'partner-edge', label: '伴侶' },
-  divorced: { className: 'divorced-edge', label: '離婚' },
-  ex_partner: { className: 'ex-partner-edge', label: '前伴侶' },
-}
+/** 配偶 / 伴侶連線上的文字;樣式(顏色、是否乾枯)由 VesselEdge 依 status 決定 */
+const SPOUSE_LABEL = { partner: '伴侶', divorced: '離婚', ex_partner: '前伴侶' }
 
 /** 手動搬過的卡片位置,存在這台裝置(每個家族一份) */
 const layoutKey = (fid) => `familytree:layout:${fid}`
@@ -275,8 +263,8 @@ function TreeCanvas() {
   const edges = useMemo(() => {
     const out = []
     for (const j of junctions.values()) {
-      for (const pid of j.parentIds) out.push({ id: `pc-in-${j.id}-${pid}`, source: pid, target: j.id, sourceHandle: 'bottom', targetHandle: 'top', type: 'bus', data: { bend: 'target' } })
-      for (const cid of j.childIds) out.push({ id: `pc-out-${j.id}-${cid}`, source: j.id, target: cid, sourceHandle: 'bottom', targetHandle: 'top', type: 'bus', data: { bend: 'source' } })
+      for (const pid of j.parentIds) out.push({ id: `pc-in-${j.id}-${pid}`, source: pid, target: j.id, sourceHandle: 'bottom', targetHandle: 'top', type: 'vessel', data: { kind: 'parent' } })
+      for (const cid of j.childIds) out.push({ id: `pc-out-${j.id}-${cid}`, source: j.id, target: cid, sourceHandle: 'bottom', targetHandle: 'top', type: 'vessel', data: { kind: 'child' } })
     }
     for (const s of spouses) {
       if (!peopleById.has(s.person_a_id) || !peopleById.has(s.person_b_id)) continue
@@ -291,8 +279,8 @@ function TreeCanvas() {
         target: right,
         sourceHandle: sameRow ? 'right' : 'bottom',
         targetHandle: sameRow ? 'left' : 'top',
-        type: sameRow ? 'straight' : 'step',
-        ...(SPOUSE_EDGE[s.status] || SPOUSE_EDGE.married),
+        type: 'vessel',
+        data: { kind: 'spouse', status: s.status || 'married', route: sameRow ? 'straight' : 'step', label: SPOUSE_LABEL[s.status] },
       })
     }
     return out
