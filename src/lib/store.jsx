@@ -10,14 +10,19 @@ import { useToast } from './toast.jsx'
  * - 家族群組:一個帳號可加入多個 family,目前使用中的 family 記在 localStorage
  * - 資料:people / parent_child / spouses 一次整包載入(家族樹規模小),
  *   Realtime postgres_changes → 重新抓取;另有 60 秒輪詢與回到前景時重抓作為備援
- * - 離線:最後一次成功載入的資料快取在 localStorage,離線時仍可瀏覽
+ * - 離線:最後一次的資料快取在 localStorage,離線時仍可瀏覽;
+ *   寫入(新增 / 修改 / 刪除人物、關係、紀事、成員設定)先套用到本機並放進 outbox,再背景依序同步到 Supabase,
+ *   離線或連不上時保留在 outbox,連線恢復後自動重送;伺服器拒絕(權限、重複關係)的操作會被丟棄並提示,然後重抓校正。
+ *   需要伺服器回應的 RPC(建立 / 加入家族、重產邀請碼)仍為線上操作
  * - 稱謂:viewpoint 對所有人的稱謂用單次 BFS 一次算完(純前端、即時)
  */
 
 const StoreContext = createContext(null)
 const FAMILY_KEY = 'familytree:family'
+const OUTBOX_KEY = 'familytree:outbox'
 const cacheKey = (fid) => `familytree:cache:${fid}`
 const POLL_MS = 60_000
+const MAX_TRIES = 10 // 有網路卻連續失敗這麼多次就放棄該筆,避免卡住整個佇列
 const WATCHED_TABLES = ['people', 'parent_child', 'spouses', 'person_entries', 'family_members', 'families', 'family_codes']
 
 const AUTH_EMAIL_DOMAIN = 'familytree.invalid'
@@ -57,6 +62,23 @@ function isNetworkError(e) {
   const msg = String(e?.message || e || '')
   return (typeof navigator !== 'undefined' && navigator.onLine === false) || /Failed to fetch|NetworkError|Load failed|network/i.test(msg)
 }
+const newId = () => crypto.randomUUID()
+const nowIso = () => new Date().toISOString()
+
+/** 把一筆 outbox 操作真的送到 Supabase */
+async function execOp(op) {
+  if (op.type === 'insert') {
+    const { error } = await supabase.from(op.table).insert(op.row)
+    // 重送時上次可能其實已寫入(回應遺失):同一主鍵重複視為成功;其他唯一鍵衝突(重複關係)是真正的錯誤
+    if (error && !/_pkey/.test(error.message || '')) throw error
+  } else if (op.type === 'update') {
+    const { error } = await supabase.from(op.table).update(op.row).eq('id', op.rowId)
+    throwIf(error)
+  } else if (op.type === 'delete') {
+    const { error } = await supabase.from(op.table).delete().eq('id', op.rowId)
+    throwIf(error)
+  }
+}
 
 /** 把 Supabase 的錯誤訊息翻成比較好懂的中文 */
 export function friendlyError(e) {
@@ -77,6 +99,17 @@ export function friendlyError(e) {
 
 export function StoreProvider({ children }) {
   const toast = useToast()
+
+  // ---------- 離線寫入佇列 ----------
+  const [outbox, setOutboxState] = useState(() => readJSON(OUTBOX_KEY) ?? [])
+  const outboxRef = useRef(outbox)
+  const flushing = useRef(false)
+  const setOutbox = useCallback((next) => {
+    const value = typeof next === 'function' ? next(outboxRef.current) : next
+    outboxRef.current = value
+    writeJSON(OUTBOX_KEY, value.length ? value : null)
+    setOutboxState(value)
+  }, [])
 
   // ---------- Auth ----------
   const [authLoading, setAuthLoading] = useState(isConfigured)
@@ -114,9 +147,13 @@ export function StoreProvider({ children }) {
   }, [])
 
   const logout = useCallback(async () => {
+    // 尚未同步的變更綁定目前帳號,登出後不能由另一個帳號送出
+    const n = outboxRef.current.length
+    if (n > 0 && !confirm(`還有 ${n} 筆變更尚未同步到伺服器,登出會直接捨棄。確定登出?`)) return
+    setOutbox([])
     await supabase.auth.signOut()
     setAuthUser(null)
-  }, [])
+  }, [setOutbox])
 
   // ---------- 家族群組 ----------
   const [memberships, setMemberships] = useState(null) // null = 尚未載入
@@ -224,6 +261,7 @@ export function StoreProvider({ children }) {
 
   const refresh = useCallback(async () => {
     if (!familyId || !authUser) return
+    if (outboxRef.current.length > 0) return // 還有未同步的變更:不覆蓋本機狀態,flush 完成後會再抓
     setSyncing(true)
     try {
       const [fam, mem, ppl, pc, sp, en, cd] = await Promise.all([
@@ -237,6 +275,7 @@ export function StoreProvider({ children }) {
         supabase.from('family_codes').select('*').eq('family_id', familyId).maybeSingle(),
       ])
       for (const r of [fam, mem, ppl, pc, sp, en]) throwIf(r.error)
+      if (outboxRef.current.length > 0) return // 抓取期間又有新變更:以本機為準
       const snap = { family: fam.data, members: mem.data ?? [], people: ppl.data ?? [], parentChild: pc.data ?? [], spouses: sp.data ?? [], entries: en.data ?? [], at: Date.now() }
       applySnapshot(snap)
       setCodes(cd.error ? null : cd.data)
@@ -251,12 +290,61 @@ export function StoreProvider({ children }) {
     }
   }, [familyId, authUser, applySnapshot])
 
+  /** 依序把 outbox 送出;連不上就保留稍後重送,被伺服器拒絕就丟棄並提示 */
+  const flush = useCallback(async () => {
+    if (flushing.current || !authUser || outboxRef.current.length === 0) return
+    flushing.current = true
+    setSyncing(true)
+    let needRefresh = false
+    try {
+      while (outboxRef.current.length > 0) {
+        const op = outboxRef.current[0]
+        if (op.uid !== authUser.id) {
+          // 別的帳號留下的變更不能用目前身分送出
+          setOutbox((q) => q.filter((x) => x.id !== op.id))
+          needRefresh = true
+          continue
+        }
+        try {
+          await execOp(op)
+          setOutbox((q) => q.filter((x) => x.id !== op.id))
+          setOffline(false)
+          needRefresh = true
+        } catch (e) {
+          if (isNetworkError(e)) {
+            setOffline(true)
+            if (navigator.onLine !== false) {
+              // 明明有網路卻一直送不出去:累計次數,超過上限就放棄這筆,避免後面全部卡住
+              const tries = (op.tries ?? 0) + 1
+              if (tries >= MAX_TRIES) {
+                setOutbox((q) => q.filter((x) => x.id !== op.id))
+                toast.error(`同步多次失敗,已放棄這筆變更:${friendlyError(e)}`)
+                needRefresh = true
+                continue
+              }
+              setOutbox((q) => q.map((x) => (x.id === op.id ? { ...x, tries } : x)))
+            }
+            break
+          }
+          setOutbox((q) => q.filter((x) => x.id !== op.id))
+          toast.error(`同步失敗,已還原:${friendlyError(e)}`)
+          needRefresh = true
+        }
+      }
+    } finally {
+      flushing.current = false
+      setSyncing(false)
+    }
+    if (needRefresh) await refresh().catch(() => {})
+  }, [authUser, setOutbox, refresh, toast])
+
   const scheduleRefresh = useCallback(() => {
     clearTimeout(refreshTimer.current)
     refreshTimer.current = setTimeout(() => {
-      refresh().catch((e) => console.warn('重新載入失敗', e))
+      if (outboxRef.current.length > 0) flush().catch(() => {})
+      else refresh().catch((e) => console.warn('重新載入失敗', e))
     }, 250)
-  }, [refresh])
+  }, [refresh, flush])
 
   useEffect(() => {
     if (!authUser || !familyId) {
@@ -274,9 +362,17 @@ export function StoreProvider({ children }) {
       setReady(false)
       applySnapshot({})
     }
+    // 丟掉別的帳號留下的未同步變更(同一台裝置換人登入)
+    const foreign = outboxRef.current.filter((op) => op.uid !== authUser.id)
+    if (foreign.length > 0) {
+      setOutbox((q) => q.filter((op) => op.uid === authUser.id))
+      toast.info(`已捨棄 ${foreign.length} 筆其他帳號未同步的變更`)
+    }
+
     ;(async () => {
       try {
-        await refresh()
+        if (outboxRef.current.length > 0) await flush()
+        else await refresh()
         if (!cancelled) setReady(true)
       } catch (e) {
         if (cancelled) return
@@ -312,7 +408,13 @@ export function StoreProvider({ children }) {
       window.removeEventListener('offline', onOffline)
       supabase.removeChannel(channel)
     }
-  }, [authUser, familyId, attempt, refresh, scheduleRefresh, applySnapshot])
+  }, [authUser, familyId, attempt, refresh, flush, scheduleRefresh, applySnapshot, setOutbox, toast])
+
+  // 本機變更(含尚未同步的)也寫進快取,離線時關掉再開不會看到舊資料;family.id 對不上代表還是上一個家族的資料
+  useEffect(() => {
+    if (!ready || !familyId || family?.id !== familyId) return
+    writeJSON(cacheKey(familyId), { family, members, people, parentChild, spouses, entries, at: Date.now() })
+  }, [ready, familyId, family, members, people, parentChild, spouses, entries])
 
   const retry = useCallback(() => setAttempt((n) => n + 1), [])
 
@@ -343,6 +445,7 @@ export function StoreProvider({ children }) {
   // ---------- 寫入 ----------
   const stamp = useCallback(() => ({ family_id: familyId, updated_by: member?.id ?? null }), [familyId, member])
 
+  /** 線上操作(需要伺服器回應的 RPC):失敗直接拋出中文錯誤 */
   const run = useCallback(
     async (fn) => {
       try {
@@ -356,141 +459,117 @@ export function StoreProvider({ children }) {
     [scheduleRefresh],
   )
 
+  /** 離線優先寫入:先套用到本機、寫進 outbox,再背景同步 */
+  const mutate = useCallback(
+    (op, applyLocal) => {
+      applyLocal()
+      setOutbox((q) => [...q, { id: newId(), uid: authUser?.id ?? null, ...op }])
+      setTimeout(() => flush().catch(() => {}), 0)
+    },
+    [authUser, setOutbox, flush],
+  )
+
   const addPerson = useCallback(
-    (fields) =>
-      run(async () => {
-        const row = { ...stamp(), created_by: member?.id ?? null, ...fields }
-        const { data, error } = await supabase.from('people').insert(row).select('id').single()
-        throwIf(error)
-        // 立即放進本地狀態,讓後續建關係的 UI 不用等 refresh
-        setPeople((list) => (list.some((p) => p.id === data.id) ? list : [...list, { ...row, id: data.id, created_at: new Date().toISOString(), updated_at: new Date().toISOString() }]))
-        return data.id
-      }),
-    [run, stamp, member],
+    async (fields) => {
+      const row = { id: newId(), ...stamp(), created_by: member?.id ?? null, ...fields }
+      mutate({ type: 'insert', table: 'people', row }, () => setPeople((list) => [...list, { ...row, created_at: nowIso(), updated_at: nowIso() }]))
+      return row.id
+    },
+    [mutate, stamp, member],
   )
 
   const updatePerson = useCallback(
-    (id, fields) =>
-      run(async () => {
-        const patch = { ...fields, updated_by: member?.id ?? null }
-        const { error } = await supabase.from('people').update(patch).eq('id', id)
-        throwIf(error)
-        setPeople((list) => list.map((p) => (p.id === id ? { ...p, ...patch, updated_at: new Date().toISOString() } : p)))
-      }),
-    [run, member],
+    async (id, fields) => {
+      const patch = { ...fields, updated_by: member?.id ?? null }
+      mutate({ type: 'update', table: 'people', rowId: id, row: patch }, () =>
+        setPeople((list) => list.map((p) => (p.id === id ? { ...p, ...patch, updated_at: nowIso() } : p))),
+      )
+    },
+    [mutate, member],
   )
 
   const deletePerson = useCallback(
-    (id) =>
-      run(async () => {
-        const { error } = await supabase.from('people').delete().eq('id', id)
-        throwIf(error)
+    async (id) => {
+      mutate({ type: 'delete', table: 'people', rowId: id }, () => {
         setPeople((list) => list.filter((p) => p.id !== id))
         setParentChild((list) => list.filter((r) => r.parent_id !== id && r.child_id !== id))
         setSpouses((list) => list.filter((r) => r.person_a_id !== id && r.person_b_id !== id))
         setEntries((list) => list.filter((r) => r.person_id !== id))
-      }),
-    [run],
+      })
+    },
+    [mutate],
   )
 
   const addParentChild = useCallback(
-    (parentId, childId) =>
-      run(async () => {
-        if (parentId === childId) throw new Error('不能把自己設成自己的父母')
-        const row = { family_id: familyId, parent_id: parentId, child_id: childId, created_by: member?.id ?? null }
-        const { data, error } = await supabase.from('parent_child').insert(row).select('*').single()
-        throwIf(error)
-        setParentChild((list) => (list.some((r) => r.id === data.id) ? list : [...list, data]))
-        return data.id
-      }),
-    [run, familyId, member],
+    async (parentId, childId) => {
+      if (parentId === childId) throw new Error('不能把自己設成自己的父母')
+      if (parentChild.some((r) => r.parent_id === parentId && r.child_id === childId)) throw new Error('這組親子關係已經存在')
+      const row = { id: newId(), family_id: familyId, parent_id: parentId, child_id: childId, created_by: member?.id ?? null }
+      mutate({ type: 'insert', table: 'parent_child', row }, () => setParentChild((list) => [...list, { ...row, created_at: nowIso() }]))
+      return row.id
+    },
+    [mutate, familyId, member, parentChild],
   )
 
   const removeParentChild = useCallback(
-    (id) =>
-      run(async () => {
-        const { error } = await supabase.from('parent_child').delete().eq('id', id)
-        throwIf(error)
-        setParentChild((list) => list.filter((r) => r.id !== id))
-      }),
-    [run],
+    async (id) => mutate({ type: 'delete', table: 'parent_child', rowId: id }, () => setParentChild((list) => list.filter((r) => r.id !== id))),
+    [mutate],
   )
 
   const addSpouse = useCallback(
-    (a, b, status = 'married') =>
-      run(async () => {
-        if (a === b) throw new Error('不能和自己結婚')
-        const row = { family_id: familyId, person_a_id: a, person_b_id: b, status, created_by: member?.id ?? null, updated_by: member?.id ?? null }
-        const { data, error } = await supabase.from('spouses').insert(row).select('*').single()
-        throwIf(error)
-        setSpouses((list) => (list.some((r) => r.id === data.id) ? list : [...list, data]))
-        return data.id
-      }),
-    [run, familyId, member],
+    async (a, b, status = 'married') => {
+      if (a === b) throw new Error('不能和自己結婚')
+      if (spouses.some((r) => (r.person_a_id === a && r.person_b_id === b) || (r.person_a_id === b && r.person_b_id === a))) throw new Error('這兩個人已經有配偶紀錄了')
+      const row = { id: newId(), family_id: familyId, person_a_id: a, person_b_id: b, status, created_by: member?.id ?? null, updated_by: member?.id ?? null }
+      mutate({ type: 'insert', table: 'spouses', row }, () => setSpouses((list) => [...list, { ...row, created_at: nowIso(), updated_at: nowIso() }]))
+      return row.id
+    },
+    [mutate, familyId, member, spouses],
   )
 
   const updateSpouse = useCallback(
-    (id, status) =>
-      run(async () => {
-        const { error } = await supabase.from('spouses').update({ status, updated_by: member?.id ?? null }).eq('id', id)
-        throwIf(error)
-        setSpouses((list) => list.map((r) => (r.id === id ? { ...r, status } : r)))
-      }),
-    [run, member],
+    async (id, status) => {
+      const patch = { status, updated_by: member?.id ?? null }
+      mutate({ type: 'update', table: 'spouses', rowId: id, row: patch }, () => setSpouses((list) => list.map((r) => (r.id === id ? { ...r, ...patch, updated_at: nowIso() } : r))))
+    },
+    [mutate, member],
   )
 
   const removeSpouse = useCallback(
-    (id) =>
-      run(async () => {
-        const { error } = await supabase.from('spouses').delete().eq('id', id)
-        throwIf(error)
-        setSpouses((list) => list.filter((r) => r.id !== id))
-      }),
-    [run],
+    async (id) => mutate({ type: 'delete', table: 'spouses', rowId: id }, () => setSpouses((list) => list.filter((r) => r.id !== id))),
+    [mutate],
   )
 
   const addEntry = useCallback(
-    (fields) =>
-      run(async () => {
-        const row = { ...stamp(), created_by: member?.id ?? null, ...fields }
-        const { data, error } = await supabase.from('person_entries').insert(row).select('*').single()
-        throwIf(error)
-        setEntries((list) => (list.some((r) => r.id === data.id) ? list : [...list, data]))
-        return data.id
-      }),
-    [run, stamp, member],
+    async (fields) => {
+      const row = { id: newId(), ...stamp(), created_by: member?.id ?? null, ...fields }
+      mutate({ type: 'insert', table: 'person_entries', row }, () => setEntries((list) => [...list, { ...row, created_at: nowIso(), updated_at: nowIso() }]))
+      return row.id
+    },
+    [mutate, stamp, member],
   )
 
   const updateEntry = useCallback(
-    (id, fields) =>
-      run(async () => {
-        const patch = { ...fields, updated_by: member?.id ?? null }
-        const { error } = await supabase.from('person_entries').update(patch).eq('id', id)
-        throwIf(error)
-        setEntries((list) => list.map((r) => (r.id === id ? { ...r, ...patch, updated_at: new Date().toISOString() } : r)))
-      }),
-    [run, member],
+    async (id, fields) => {
+      const patch = { ...fields, updated_by: member?.id ?? null }
+      mutate({ type: 'update', table: 'person_entries', rowId: id, row: patch }, () =>
+        setEntries((list) => list.map((r) => (r.id === id ? { ...r, ...patch, updated_at: nowIso() } : r))),
+      )
+    },
+    [mutate, member],
   )
 
   const deleteEntry = useCallback(
-    (id) =>
-      run(async () => {
-        const { error } = await supabase.from('person_entries').delete().eq('id', id)
-        throwIf(error)
-        setEntries((list) => list.filter((r) => r.id !== id))
-      }),
-    [run],
+    async (id) => mutate({ type: 'delete', table: 'person_entries', rowId: id }, () => setEntries((list) => list.filter((r) => r.id !== id))),
+    [mutate],
   )
 
   const updateMember = useCallback(
-    (patch) =>
-      run(async () => {
-        if (!member) throw new Error('尚未載入成員資料')
-        const { error } = await supabase.from('family_members').update(patch).eq('id', member.id)
-        throwIf(error)
-        setMembers((list) => list.map((m) => (m.id === member.id ? { ...m, ...patch } : m)))
-      }),
-    [run, member],
+    async (patch) => {
+      if (!member) throw new Error('尚未載入成員資料')
+      mutate({ type: 'update', table: 'family_members', rowId: member.id, row: patch }, () => setMembers((list) => list.map((m) => (m.id === member.id ? { ...m, ...patch } : m))))
+    },
+    [mutate, member],
   )
   const setViewpoint = useCallback((pid) => updateMember({ viewpoint_person_id: pid }), [updateMember])
   const setSelf = useCallback(
@@ -506,13 +585,8 @@ export function StoreProvider({ children }) {
   const setDisplayName = useCallback((name) => updateMember({ display_name: name }), [updateMember])
 
   const renameFamily = useCallback(
-    (name) =>
-      run(async () => {
-        const { error } = await supabase.from('families').update({ name }).eq('id', familyId)
-        throwIf(error)
-        setFamily((f) => (f ? { ...f, name } : f))
-      }),
-    [run, familyId],
+    async (name) => mutate({ type: 'update', table: 'families', rowId: familyId, row: { name } }, () => setFamily((f) => (f ? { ...f, name } : f))),
+    [mutate, familyId],
   )
 
   const regenerateInvite = useCallback(
@@ -554,7 +628,7 @@ export function StoreProvider({ children }) {
       memberships, membershipsError, retryMemberships: () => setMembershipAttempt((n) => n + 1),
       familyId, family, codes, member, members, canEdit, switchFamily, createFamily, joinFamily, leaveFamily, renameFamily, regenerateInvite, regenerateViewCode,
       people, parentChild, spouses, entries, graph, peopleById, nameOf, memberName,
-      ready, fatal, retry, refresh, offline, syncing,
+      ready, fatal, retry, refresh, offline, syncing, pending: outbox.length, sync: flush,
       viewpointId, selfId, advanced, terms, termFor,
       addPerson, updatePerson, deletePerson, addParentChild, removeParentChild, addSpouse, updateSpouse, removeSpouse,
       addEntry, updateEntry, deleteEntry,
@@ -564,7 +638,7 @@ export function StoreProvider({ children }) {
     [
       authLoading, authUser, login, signup, logout, memberships, membershipsError, familyId, family, codes, member, members, canEdit,
       switchFamily, createFamily, joinFamily, leaveFamily, renameFamily, regenerateInvite, regenerateViewCode, people, parentChild, spouses, entries,
-      graph, peopleById, nameOf, memberName, ready, fatal, retry, refresh, offline, syncing, viewpointId, selfId, advanced,
+      graph, peopleById, nameOf, memberName, ready, fatal, retry, refresh, offline, syncing, outbox.length, flush, viewpointId, selfId, advanced,
       terms, termFor, addPerson, updatePerson, deletePerson, addParentChild, removeParentChild, addSpouse, updateSpouse,
       removeSpouse, addEntry, updateEntry, deleteEntry, setViewpoint, setSelf, setAdvanced, setDisplayName, toast,
     ],

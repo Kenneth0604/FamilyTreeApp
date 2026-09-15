@@ -1,0 +1,16 @@
+{
+  "appId": "app.kennethlin.familytree",
+  "appName": "家族樹",
+  "webDir": "dist",
+  "backgroundColor": "#fbf4f8",
+  "server": {
+    "url": "https://kenneth0604.github.io/FamilyTreeApp/",
+    "androidScheme": "https"
+  },
+  "ios": {
+    "contentInset": "always"
+  },
+  "android": {
+    "backgroundColor": "#fbf4f8"
+  }
+}

@@ -4,7 +4,7 @@ import { useStore } from '../lib/store.jsx'
 import { onAppUpdate } from '../lib/sw-register.js'
 
 export default function Layout() {
-  const { family, member, canEdit, offline, syncing, refresh, viewpointId, nameOf, people } = useStore()
+  const { family, member, canEdit, offline, syncing, pending, sync, refresh, viewpointId, nameOf, people } = useStore()
   const [updateReady, setUpdateReady] = useState(false)
   const location = useLocation()
   useEffect(() => onAppUpdate(() => setUpdateReady(true)), [])
@@ -37,16 +37,21 @@ export default function Layout() {
         </div>
       </header>
 
-      {updateReady && (
+      {/* 還有變更沒送出時不提示重新載入,避免重載時遺失 */}
+      {updateReady && pending === 0 && (
         <button onClick={() => window.location.reload()} className="flex items-center justify-center gap-2 bg-success-soft px-4 py-1.5 text-xs font-medium text-success">
           ✨ 有新版本 · 點這裡重新載入
         </button>
       )}
-      {offline && (
-        <button onClick={() => refresh().catch(() => {})} className="flex items-center justify-center gap-2 bg-warning-soft px-4 py-1.5 text-xs font-medium text-warning">
-          📴 目前離線,顯示的是上次快取的資料{syncing ? ' · 重試中…' : ' · 點此重試'}
+      {offline ? (
+        <button onClick={() => (pending > 0 ? sync() : refresh()).catch(() => {})} className="flex items-center justify-center gap-2 bg-warning-soft px-4 py-1.5 text-xs font-medium text-warning">
+          📴 目前離線{pending > 0 ? `,${pending} 筆變更會在連線後自動同步` : ',顯示的是上次快取的資料'}{syncing ? ' · 重試中…' : ' · 點此重試'}
         </button>
-      )}
+      ) : pending > 0 ? (
+        <button onClick={() => sync().catch(() => {})} className="flex items-center justify-center gap-2 bg-warning-soft px-4 py-1.5 text-xs font-medium text-warning">
+          ☁ {pending} 筆變更尚未同步{syncing ? ' · 同步中…' : ' · 點此重試'}
+        </button>
+      ) : null}
 
       <main className={isTree ? 'relative flex-1 overflow-hidden' : 'flex-1 overflow-x-hidden overflow-y-auto px-4 pb-6 pt-4'}>
         <Outlet />

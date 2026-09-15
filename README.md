@@ -6,7 +6,8 @@
 - 樹狀圖:React Flow(`@xyflow/react`)+ 自訂的世代分層排版
 - 後端:Supabase(Postgres + RLS + Realtime + Storage + Auth)
 - 部署:GitHub Actions → GitHub Pages
-- PWA:manifest + Service Worker,可加到手機主畫面、離線可看已快取的資料
+- PWA:manifest + Service Worker,可加到手機主畫面;離線可看已快取的資料,離線做的變更會排隊、連線後自動同步
+- 行動裝置:Capacitor 原生殼(iOS / Android),見第四章
 - 架構沿用既有專案 MissionApp
 
 ---
@@ -24,6 +25,7 @@
 | 生平紀事 | 履歷式條列:職業經歷 / 學歷 / 重要事蹟 / 居住地 / 榮譽獎項 / 其他,各區 1. 2. 3. 依時間排序;每筆有標題、起迄時間(可只填年份、可勾「至今」)與詳細說明 |
 | 設定 | 切換視角(我是誰)、綁定帳號的真實身分、進階稱謂模式、兩種邀請碼管理(分享 / 重新產生,僅可編輯成員可見)、家族名稱、主題(粉粉 / 黑黑)、切換家族、離開家族 |
 | 即時同步 | Supabase Realtime + 60 秒輪詢 + 回到前景時重抓 |
+| 離線寫入 | 新增 / 修改 / 刪除先套用到本機並放進 outbox(localStorage),背景依序送到 Supabase;離線或連不上就保留、連線後自動重送;被伺服器拒絕(權限、重複關係)的變更會還原並提示。畫面上方顯示尚未同步的筆數,有未同步變更時不會提示重新載入新版本 |
 
 ---
 
@@ -83,7 +85,7 @@ npm test
 | `family_members` | 帳號 × 家族的身分:display_name、self_person_id、viewpoint_person_id、advanced_terms |
 | `people` | name、gender(male / female / unspecified)、birth_date(文字,`YYYY` / `YYYY-MM` / `YYYY-MM-DD` 或 null)、is_deceased、avatar_url、note、created_by / updated_by / updated_at |
 | `parent_child` | parent_id → child_id |
-| `spouses` | person_a_id、person_b_id、status(married / divorced / widowed) |
+| `spouses` | person_a_id、person_b_id、status(married / widowed / partner 未婚伴侶 / divorced / ex_partner 前伴侶);已結束的關係(divorced / ex_partner)稱謂推算不走、樹狀圖不並排,但仍可有共同子女 |
 | `person_entries` | 生平紀事:person_id、category(career / education / event / residence / award / other)、title、detail、start_date / end_date(同 birth_date 格式)、ongoing |
 
 RLS:所有表以 `is_family_member(family_id)` 判斷讀取,寫入另需 `is_family_editor(family_id)`(`family_members.role = 'editor'`);兩種邀請碼放在獨立的 `family_codes` 表,RLS 只讓 editor 讀。建立家族 / 加入(`join_family` 依碼是 invite_code 或 view_code 給 editor / viewer)/ 重新產生兩種碼都透過 security definer 的 RPC。
@@ -123,6 +125,20 @@ https://kenneth0604.github.io/FamilyTreeApp/
 
 Supabase 免費方案 7 天沒有 API 活動會暫停專案。[`.github/workflows/keep-alive.yml`](.github/workflows/keep-alive.yml) 每 3 天呼叫一次 `rpc/keep_alive`,使用與部署相同的兩個 secrets。GitHub 對 60 天沒有 commit 的 repo 會停用排程,屆時到 Actions 頁點 **Enable workflow** 即可。
 
+## 四、行動裝置 App(Capacitor)
+
+`capacitor.config.json` 讓原生殼開啟後直接載入正式網址(`server.url` → GitHub Pages),所以網頁部署後 App 下次開啟就是新版,不需要重新上架;只有改原生設定、圖示或加原生外掛時才需要重新建置。
+
+首次建立原生專案(需本機安裝 Xcode / Android Studio):
+
+```bash
+npm install
+npx cap add ios        # 產生 ios/
+npx cap add android    # 產生 android/
+npm run cap:sync       # 建置網頁並同步到原生殼
+npm run cap:open:ios   # 或 cap:open:android,開啟 IDE 建置 / 上傳
+```
+
 ---
 
 ## 專案結構
@@ -131,7 +147,7 @@ Supabase 免費方案 7 天沒有 API 活動會暫停專案。[`.github/workflow
 src/
   lib/kinship/        稱謂引擎(graph.js BFS、terms.js 規則表、birth.js 生日比較)+ 測試
   lib/treeLayout.js   樹狀圖世代分層排版
-  lib/store.jsx       Auth / 家族 / 資料載入 / Realtime / 寫入
+  lib/store.jsx       Auth / 家族 / 資料載入 / Realtime / 離線寫入佇列(outbox)
   lib/images.js       大頭照裁切壓縮上傳(Storage bucket avatars)
   pages/              Login、FamilyGate(建立 / 加入)、Tree、People、PersonForm、PersonDetail、Settings
   components/         Layout、Avatar、TermBadge、PersonPicker、AvatarUploader、PersonCard…
