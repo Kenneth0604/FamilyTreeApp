@@ -4,7 +4,7 @@ import { useStore } from '../lib/store.jsx'
 import { onAppUpdate } from '../lib/sw-register.js'
 
 export default function Layout() {
-  const { family, member, canEdit, offline, syncing, pending, sync, refresh, viewpointId, nameOf, people } = useStore()
+  const { family, member, canEdit, offline, syncing, pending, sync, refresh, viewpointId, nameOf, people, isMerged, sameCandidates = [] } = useStore()
   const [updateReady, setUpdateReady] = useState(false)
   const location = useLocation()
   useEffect(() => onAppUpdate(() => setUpdateReady(true)), [])
@@ -42,6 +42,11 @@ export default function Layout() {
         <button onClick={() => window.location.reload()} className="flex items-center justify-center gap-2 bg-success-soft px-4 py-1.5 text-xs font-medium text-success">
           ✨ 有新版本 · 點這裡重新載入
         </button>
+      )}
+      {isMerged && sameCandidates.length > 0 && location.pathname !== '/merged-matches' && (
+        <NavLink to="/merged-matches" className="flex items-center justify-center gap-2 bg-accent-soft px-4 py-1.5 text-xs font-medium text-accent">
+          👥 「{family?.name}」合併樹有一樣的人!{sameCandidates.length} 組同名 · 點此確認是否為同一人
+        </NavLink>
       )}
       {offline ? (
         <button onClick={() => (pending > 0 ? sync() : refresh()).catch(() => {})} className="flex items-center justify-center gap-2 bg-warning-soft px-4 py-1.5 text-xs font-medium text-warning">

@@ -223,9 +223,10 @@ input[type="date"], input[type="number"] {
 .tree-canvas .react-flow__node img { -webkit-touch-callout: none; pointer-events: none; }
 /* 小家庭虛線框:純裝飾,不攔截點擊 / 拖曳 */
 .react-flow__node-household { pointer-events: none !important; }
-/* 長按後拖曳中的卡片(用 filter 而不是 box-shadow,才不會蓋掉 ring) */
+/* 編輯排版:選取中的卡片(outline 不會蓋掉 ring),拖曳中浮起來 */
+.react-flow__node.person-selected > .card { outline: 3px solid var(--t-accent); outline-offset: 3px; cursor: grab; }
 .react-flow__node.person-dragging { z-index: 20 !important; }
-.react-flow__node.person-dragging > .card { filter: drop-shadow(0 12px 16px rgb(0 0 0 / 0.3)); }
+.react-flow__node.person-dragging > .card { filter: drop-shadow(0 12px 16px rgb(0 0 0 / 0.3)); cursor: grabbing; }
 
 @layer components {
   .card { @apply rounded-2xl bg-surface shadow-sm ring-1 ring-line; }

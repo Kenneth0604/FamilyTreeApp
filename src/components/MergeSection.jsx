@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { Link } from 'react-router-dom'
 import { useStore } from '../lib/store.jsx'
 import { useToast } from '../lib/toast.jsx'
 import PersonPicker from './PersonPicker.jsx'
@@ -16,7 +17,8 @@ export default function MergeSection() {
 }
 
 function MergedInfo() {
-  const { family, memberships, switchFamily, removeMerge } = useStore()
+  const { family, memberships, switchFamily, removeMerge, sameCandidates, mergeLinks } = useStore()
+  const sameCount = mergeLinks.filter((l) => l.relation === 'same_person').length
   const toast = useToast()
   const [busy, setBusy] = useState(false)
   const sources = family?.sources ?? []
@@ -50,6 +52,9 @@ function MergedInfo() {
             </button>
           ))}
         </div>
+        <Link to="/merged-matches" className={`block rounded-xl px-3 py-2 text-center text-sm ${sameCandidates.length ? 'bg-accent-soft text-accent' : 'bg-surface-2 text-ink'}`}>
+          👥 同一個人?{sameCandidates.length ? ` ${sameCandidates.length} 組待確認` : sameCount ? ` 已合併 ${sameCount} 人` : ' 檢查兩邊有沒有重複的人'}
+        </Link>
         {canRemove && (
           <button onClick={onRemove} className="w-full text-center text-xs text-muted hover:text-danger" disabled={busy}>
             解除合併(只刪除這棵合併樹)

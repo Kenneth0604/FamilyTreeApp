@@ -17,7 +17,7 @@ export default function PersonDetail() {
   const navigate = useNavigate()
   const toast = useToast()
   const store = useStore()
-  const { peopleById, graph, parentChild, spouses, pets, termFor, viewpointId, selfId, advanced, memberName, nameOf, canEdit } = store
+  const { peopleById, graph, parentChild, spouses, pets, termFor, viewpointId, selfId, advanced, memberName, nameOf, canEdit, family } = store
   const person = peopleById.get(id)
 
   const [adding, setAdding] = useState(null) // 'parent' | 'child' | 'spouse' | 'sibling' | null
@@ -113,6 +113,11 @@ export default function PersonDetail() {
             <div className="mt-1.5">
               {viewpointId ? <TermBadge result={term} size="sm" showHint /> : <span className="text-xs text-muted">尚未設定視角</span>}
             </div>
+            {person.aliases?.length > 0 && (
+              <p className="mt-1 text-xs text-muted">
+                同一人:{person.aliases.map((a) => `${family?.sources?.find((s) => s.id === a.family_id)?.name ?? '另一個家族'}的「${a.name}」`).join('、')}
+              </p>
+            )}
             <dl className="mt-2 grid grid-cols-[auto_1fr] gap-x-3 gap-y-0.5 text-sm">
               <dt className="text-muted">性別</dt>
               <dd className="text-ink">{GENDER_LABEL[person.gender]}</dd>

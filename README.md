@@ -18,11 +18,11 @@
 | --- | --- |
 | 帳號 | 帳號 + 密碼(Supabase Auth)。首次登入建立新家族,或輸入 6 碼邀請碼(或點連結)加入;一個帳號可加入多個家族並隨時切換 |
 | 家族群組 | 一個家族樹屬於一個 family,每個家族有兩種邀請碼:**可編輯**的邀請碼加入後可共同新增、編輯;**只能查看**的邀請碼加入後只能瀏覽(RLS 強制)。兩種碼都在同一個輸入框輸入,身分由碼決定。每筆資料記錄 created_by / updated_by,詳細頁顯示「最後由誰編輯」 |
-| 樹狀圖 | 以視角為中心、依世代分層(配偶並排、子女在下一層);同一對父母先匯合到一個連接點再分岔到各孩子,連線是「血管」造型(父母端粗 → 中段細管 → 孩子端再變寬,轉角圓滑),血球沿管子由父母流向孩子(CSS 動畫,尊重 prefers-reduced-motion)。卡片顯示大頭照 / 姓名(小名)/ 稱謂,大小隨「戰力」縮放;配偶線是不流動的小血管:伴侶偏紫、離婚 / 前伴侶淡化成乾枯的虛線外框並標字。長按卡片可拖曳調整位置(記在這台裝置,可一鍵重新排版),點卡片看詳細 |
+| 樹狀圖 | 以視角為中心、依世代分層(配偶並排、子女在下一層);同一對父母先匯合到一個連接點再分岔到各孩子,連線是「血管」造型(父母端粗 → 中段細管 → 孩子端再變寬,轉角圓滑),血球沿管子由父母流向孩子(CSS 動畫,尊重 prefers-reduced-motion)。卡片顯示大頭照 / 姓名(小名)/ 稱謂,大小隨「戰力」縮放;配偶線是不流動的小血管:伴侶偏紫、離婚 / 前伴侶淡化成乾枯的虛線外框並標字。「✋ 編輯排版」模式下先點一下卡片選取、再按住拖曳調整位置(記在這台裝置,可一鍵重新排版);平常點卡片看詳細 |
 | 成員列表 | 搜尋姓名或稱謂,依世代分組,卡片顯示姓名、稱謂、年齡、大頭照 |
 | 新增 / 編輯 | 姓名、性別、生日(可只填年份)、是否過世、大頭照、備註;新增時選「跟樹上哪位成員是什麼關係」(父母 / 子女 / 配偶 / 兄弟姊妹)。選兄弟姊妹但對方沒有父母時,自動建立可稍後補資料的父 / 母佔位節點 |
 | 詳細頁 | 基本資料(姓名旁顯示多個小名、#自訂標籤、政治立場 藍 / 綠 / 白)、與視角的稱謂(含推算路徑)、管理父母 / 配偶・伴侶(已婚 / 未婚伴侶 / 離婚 / 前伴侶 / 喪偶)/ 子女關係、兄弟姊妹(自動推算) |
-| 合併家族樹 | 兩個家族各出一個人、指定關係(配偶 / 親子),透過 6 碼連結碼合併成一棵新的唯讀家族樹:A 家 editor 在設定頁選人 + 關係產生連結碼 → B 家 editor 輸入碼、預覽對方是誰、選自己這邊的人 → 建立 kind = merged 的新家族,兩邊所有成員(含之後加入的)都自動成為 viewer。合併樹沒有自己的資料,讀取時由 `get_merged_tree` RPC 把兩邊資料 + 橋接關係拼起來,在原家族編輯會同步反映;任一來源家族的 editor 可「解除合併」,只刪合併樹 |
+| 合併家族樹 | 兩個家族各出一個人、指定關係(配偶 / 親子),透過 6 碼連結碼合併成一棵新的唯讀家族樹:A 家 editor 在設定頁選人 + 關係產生連結碼 → B 家 editor 輸入碼、預覽對方是誰、選自己這邊的人 → 建立 kind = merged 的新家族,兩邊所有成員(含之後加入的)都自動成為 viewer。合併樹沒有自己的資料,讀取時由 `get_merged_tree` RPC 把兩邊資料 + 橋接關係拼起來,在原家族編輯會同步反映;任一來源家族的 editor 可「解除合併」,只刪合併樹。**同一個人**:每次資料更新都自動比對兩邊姓名 / 小名相符的人,頂端提示「XX 合併樹有一樣的人!」,到「同一個人?」頁逐組確認(附性別 / 出生年是否一致、父母是誰);確認後在合併樹裡把兩人併成一個節點(關係 / 紀事 / 寵物 / 小家庭都指向同一人、欄位取聯集),雙方的親戚就串在同一張圖上;也可標記「不是同一人」或手動從兩邊各選一人 |
 | 小家庭 | 把同住的人圈成一戶(名稱 + 顏色 + 成員),樹狀圖用該色虛線框起來;一個人可屬於多個小家庭。從樹狀圖的「⌂ 小家庭」進入管理 |
 | 顯示方式 | 樹狀圖右上「👁 顯示方式」:預設(大家一樣大)/ 家庭地位(戰力越高卡片越大)/ 讚讚人指數(指數越高越大)/ 政治立場(卡片頂端藍 / 綠 / 白色條)/ 自訂(挑幾項屬性,依平均分決定大小)。設定記在這台裝置 |
 | 戰力與讚讚人指數 | 戰力(家庭地位 0–10)+ 遊戲角色式屬性算出「讚讚人指數」:有趣 / 有病 / 脾氣 / 聰明 / 學歷 / 有錢 / 顏值 / 廚藝 / 酒量 / 愛唸 / 運氣 / 固執 / 八卦…共 30 項可挑,拉滑桿評 0–10 分,顯示數值條與低 / 高分描述,並算出綜合評分、等級(S–D)、稱號、最強 / 最弱屬性 |
@@ -92,7 +92,7 @@ npm test
 | `parent_child` | parent_id → child_id |
 | `spouses` | person_a_id、person_b_id、status(married / widowed / partner 未婚伴侶 / divorced / ex_partner 前伴侶);已結束的關係(divorced / ex_partner)稱謂推算不走、樹狀圖不並排,但仍可有共同子女 |
 | `households` | 小家庭:name、color、person_ids(uuid[]) |
-| `family_merge_sources` / `family_links` / `family_link_invites` | 合併家族樹:哪些來源家族組成、橋接關係(person_a 產生碼方、person_b 合併方;parent_side 標誰是父母)、一次性連結碼。寫入一律經由 `create_family_link_code` / `peek_family_link_code` / `merge_family_with_code` / `revoke_family_link_code` / `remove_family_merge` RPC;讀取合併樹用 `get_merged_tree`(security definer,唯一的跨家族讀取入口) |
+| `family_merge_sources` / `family_links` / `family_link_invites` | 合併家族樹:哪些來源家族組成、橋接關係(person_a 產生碼方、person_b 合併方;parent_side 標誰是父母)、一次性連結碼。寫入一律經由 `create_family_link_code` / `peek_family_link_code` / `merge_family_with_code` / `revoke_family_link_code` / `remove_family_merge` / `link_same_person` / `unlink_same_person` RPC(relation 另有 same_person / not_same_person 標記);讀取合併樹用 `get_merged_tree`(security definer,唯一的跨家族讀取入口) |
 | `pets` | 寵物:owner_person_id(可 null)、name、species、breed、gender、birth_date、is_deceased、avatar_url、note、stats(jsonb) |
 | `person_entries` | 生平紀事:person_id、category(career / education / event / health / residence / award / other)、title、detail、start_date / end_date(同 birth_date 格式)、ongoing |
 

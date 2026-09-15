@@ -8,30 +8,23 @@ import TermBadge from '../components/TermBadge.jsx'
 import VesselEdge from '../components/VesselEdge.jsx'
 import { ageLabel, birthOrderLabel, POWER_DEFAULT, STATS, VIEW_MODES, viewPresentation, scaleFromLevel, householdColor } from '../lib/format.js'
 
-const LONG_PRESS_MS = 350
-const MOVE_TOLERANCE = 8 // 長按前手指移動超過這個距離就當作是在平移畫布
-
 /**
  * 樹狀圖節點:大頭照 / 姓名(小名)/ 相對於 viewpoint 的稱謂
- * 長按卡片後可拖曳移動;直接滑動則是平移畫布(不攔截)。React Flow 內建拖曳一按就動、會吃掉平移,所以自己處理。
+ * 「編輯排版」模式:先點一下卡片選取,選取中的卡片按住就能拖曳;其他情況滑動都是平移畫布。
+ * React Flow 內建拖曳一按就動、會吃掉平移,所以自己處理指標事件。
  */
 const PersonNode = memo(function PersonNode({ id, data }) {
-  const { person, term, isViewpoint, isSelf, scale, badge, badgeStrong, tint, onDragStart, onDrag, onDragEnd } = data
+  const { person, term, isViewpoint, isSelf, scale, badge, badgeStrong, tint, layoutMode, selected, onDragStart, onDrag, onDragEnd } = data
   const { getZoom } = useReactFlow()
   const ref = useRef(null)
-  const st = useRef(null) // { pointerId, x, y, timer, armed, moved }
+  const st = useRef(null) // 拖曳中:{ pointerId, x, y }
 
-  const cancel = () => {
-    if (st.current) clearTimeout(st.current.timer)
-    st.current = null
-  }
-
-  // 觸控:長按啟動後,touchmove 不能冒泡到畫布(d3-zoom 掛在畫布上,否則卡片和畫布會一起動)。React 的 touch 事件是 passive 且掛在 root,所以用原生監聽
+  // 觸控:拖曳中的 touchmove 不能冒泡到畫布(d3-zoom 掛在畫布上,否則卡片和畫布會一起動)。React 的 touch 事件是 passive 且掛在 root,所以用原生監聽
   useEffect(() => {
     const el = ref.current
     if (!el) return
     const block = (e) => {
-      if (st.current?.armed) {
+      if (st.current) {
         e.stopPropagation()
         e.preventDefault()
       }
@@ -41,43 +34,31 @@ const PersonNode = memo(function PersonNode({ id, data }) {
   }, [])
 
   const onPointerDown = (e) => {
+    if (!layoutMode || !selected) return // 沒選取的卡片:交給畫布平移 / 點擊選取
     if (!e.isPrimary || (e.pointerType === 'mouse' && e.button !== 0)) return
-    cancel()
-    const el = e.currentTarget
-    const s = { pointerId: e.pointerId, x: e.clientX, y: e.clientY, armed: false, moved: false }
-    s.timer = setTimeout(() => {
-      s.armed = true
-      try {
-        el.setPointerCapture(s.pointerId)
-      } catch {
-        /* ignore */
-      }
-      navigator.vibrate?.(20)
-      // 滑鼠:d3-zoom 的平移手勢掛在 window 的 mousemove / mouseup 上,送一個 mouseup 結束它
-      if (e.pointerType === 'mouse') window.dispatchEvent(new MouseEvent('mouseup', { bubbles: true, clientX: e.clientX, clientY: e.clientY, view: window }))
-      onDragStart(id)
-    }, LONG_PRESS_MS)
-    st.current = s
+    try {
+      e.currentTarget.setPointerCapture(e.pointerId)
+    } catch {
+      /* ignore */
+    }
+    // 滑鼠:d3-zoom 的平移手勢掛在 window 的 mousemove / mouseup 上,送一個 mouseup 結束它
+    if (e.pointerType === 'mouse') window.dispatchEvent(new MouseEvent('mouseup', { bubbles: true, clientX: e.clientX, clientY: e.clientY, view: window }))
+    st.current = { pointerId: e.pointerId, x: e.clientX, y: e.clientY }
+    onDragStart(id)
   }
   const onPointerMove = (e) => {
     const s = st.current
     if (!s || e.pointerId !== s.pointerId) return
-    if (!s.armed) {
-      if (Math.hypot(e.clientX - s.x, e.clientY - s.y) > MOVE_TOLERANCE) cancel()
-      return
-    }
     const z = getZoom() || 1
     onDrag(id, (e.clientX - s.x) / z, (e.clientY - s.y) / z)
     s.x = e.clientX
     s.y = e.clientY
-    s.moved = true
   }
   const onPointerEnd = (e) => {
     const s = st.current
     if (!s || e.pointerId !== s.pointerId) return
-    const armed = s.armed
-    cancel()
-    if (armed) onDragEnd(id)
+    st.current = null
+    onDragEnd(id)
   }
 
   return (
@@ -195,7 +176,13 @@ function TreeCanvas() {
   useEffect(() => setOverrides(readOverrides(familyId)), [familyId])
   useEffect(() => writeOverrides(familyId, overrides), [familyId, overrides])
   const [draggingId, setDraggingId] = useState(null)
+  const [layoutMode, setLayoutMode] = useState(false)
+  const [selectedId, setSelectedId] = useState(null)
   const suppressClickUntil = useRef(0)
+  const toggleLayoutMode = () => {
+    setLayoutMode((on) => !on)
+    setSelectedId(null)
+  }
 
   // ---- 顯示方式 ----
   const [view, setView] = useState(() => readView(familyId))
@@ -320,8 +307,12 @@ function TreeCanvas() {
         type: 'person',
         position: { x: c.x, y: c.y },
         style: { width: c.w, height: c.h },
-        className: draggingId === c.p.id ? 'person-dragging' : undefined,
-        data: { person: c.p, term: terms.get(c.p.id) ?? null, isViewpoint: c.p.id === viewpointId, isSelf: c.p.id === selfId, scale: c.s, badge: c.badge, badgeStrong: c.badgeStrong, tint: c.tint, onDragStart, onDrag, onDragEnd },
+        className: [draggingId === c.p.id && 'person-dragging', layoutMode && selectedId === c.p.id && 'person-selected'].filter(Boolean).join(' ') || undefined,
+        data: {
+          person: c.p, term: terms.get(c.p.id) ?? null, isViewpoint: c.p.id === viewpointId, isSelf: c.p.id === selfId,
+          scale: c.s, badge: c.badge, badgeStrong: c.badgeStrong, tint: c.tint,
+          layoutMode, selected: layoutMode && selectedId === c.p.id, onDragStart, onDrag, onDragEnd,
+        },
         draggable: false,
         selectable: false,
       })),
@@ -334,7 +325,7 @@ function TreeCanvas() {
         selectable: false,
       })),
     ],
-    [cards, householdNodes, terms, viewpointId, selfId, junctions, draggingId, onDragStart, onDrag, onDragEnd],
+    [cards, householdNodes, terms, viewpointId, selfId, junctions, draggingId, layoutMode, selectedId, onDragStart, onDrag, onDragEnd],
   )
 
   const edges = useMemo(() => {
@@ -366,10 +357,12 @@ function TreeCanvas() {
   const onNodeClick = useCallback(
     (_e, node) => {
       if (node.type !== 'person' || Date.now() < suppressClickUntil.current) return
-      navigate(`/people/${node.id}`)
+      if (layoutMode) setSelectedId(node.id) // 編輯排版:點一下 = 選取,不開詳細頁
+      else navigate(`/people/${node.id}`)
     },
-    [navigate],
+    [navigate, layoutMode],
   )
+  const onPaneClick = useCallback(() => setSelectedId(null), [])
 
   const toggleViewStat = (id) => setView((v) => ({ ...v, stats: v.stats.includes(id) ? v.stats.filter((x) => x !== id) : [...v.stats, id] }))
   const currentMode = VIEW_MODES.find((m) => m.id === view.mode) || VIEW_MODES[0]
@@ -420,6 +413,7 @@ function TreeCanvas() {
         nodeTypes={nodeTypes}
         edgeTypes={edgeTypes}
         onNodeClick={onNodeClick}
+        onPaneClick={onPaneClick}
         nodesDraggable={false}
         nodesConnectable={false}
         elementsSelectable={false}
@@ -443,7 +437,10 @@ function TreeCanvas() {
           <button onClick={() => fitView({ padding: 0.2, duration: 400 })} className="chip text-xs shadow-sm">
             ⤢ 顯示全部
           </button>
-          {overrides.size > 0 && (
+          <button onClick={toggleLayoutMode} className={`chip text-xs shadow-sm ${layoutMode ? 'chip-active' : ''}`}>
+            {layoutMode ? '✓ 完成排版' : '✋ 編輯排版'}
+          </button>
+          {layoutMode && overrides.size > 0 && (
             <button onClick={resetLayout} className="chip text-xs shadow-sm">
               ↺ 重新排版
             </button>
@@ -494,10 +491,10 @@ function TreeCanvas() {
       )}
 
       <div className="pointer-events-none absolute inset-x-0 bottom-0 flex flex-col items-start gap-1.5 p-3">
-        {draggingId ? (
-          <p className="pointer-events-auto inline-block rounded-xl bg-accent-soft px-3 py-1.5 text-xs text-accent shadow-sm">拖曳中 · 放開即完成</p>
-        ) : (
-          overrides.size === 0 && <p className="inline-block rounded-xl bg-surface-2/80 px-3 py-1.5 text-[11px] text-muted shadow-sm">長按卡片可拖曳調整位置</p>
+        {layoutMode && (
+          <p className="pointer-events-auto inline-block rounded-xl bg-accent-soft px-3 py-1.5 text-xs text-accent shadow-sm">
+            {draggingId ? '拖曳中 · 放開即完成' : selectedId ? `已選取「${peopleById.get(selectedId)?.name ?? ''}」· 按住拖曳移動,點其他卡片切換` : '點一下卡片選取,再按住拖曳移動'}
+          </p>
         )}
         {layout.unlinked.length > 0 && viewpointId && (
           <p className="pointer-events-auto inline-block rounded-xl bg-surface-2 px-3 py-1.5 text-xs text-muted shadow-sm">

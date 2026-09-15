@@ -1,6 +1,58 @@
 import { describe, it, expect } from 'vitest'
-import { bridgeRows, linkDescription } from './merge.js'
+import { bridgeRows, linkDescription, resolveSamePerson, findSamePersonCandidates } from './merge.js'
 import { buildGraph, computeRelationTerm } from './kinship/index.js'
+
+describe('合併家族樹:同一人', () => {
+  const sources = [{ id: 'A', name: '林家' }, { id: 'B', name: '陳家' }]
+  const people = [
+    { id: 'a1', name: '林大明', gender: 'male', birth_date: '1960', family_id: 'A', nicknames: [] },
+    { id: 'a2', name: '林小美', gender: 'female', family_id: 'A', nicknames: ['美美'] },
+    { id: 'b1', name: '林大明', gender: 'male', birth_date: '1960', family_id: 'B', nicknames: ['阿明'], tags: ['ADHD'] },
+    { id: 'b2', name: '美美', gender: 'female', family_id: 'B', nicknames: [] },
+    { id: 'b3', name: '陳志明', gender: 'male', family_id: 'B', nicknames: [] },
+  ]
+  it('找出同名與小名相符的配對,已決定的不再列出', () => {
+    const c = findSamePersonCandidates(people, sources, [])
+    expect(c.map((x) => [x.a.id, x.b.id, x.reason])).toEqual([
+      ['a1', 'b1', '姓名相同'],
+      ['a2', 'b2', '一方的小名等於另一方的姓名'],
+    ])
+    expect(c[0].hints).toEqual(['性別相同', '出生年相同'])
+    const after = findSamePersonCandidates(people, sources, [{ relation: 'not_same_person', person_a_id: 'a2', person_b_id: 'b2' }, { relation: 'same_person', person_a_id: 'a1', person_b_id: 'b1' }])
+    expect(after).toEqual([])
+  })
+  it('resolveSamePerson:b 併進 a,關係改指向 a 並去重,欄位取聯集 / 補空', () => {
+    const tree = {
+      people,
+      parentChild: [
+        { id: 'p1', parent_id: 'a1', child_id: 'a2' },
+        { id: 'p2', parent_id: 'b1', child_id: 'b3' },
+        { id: 'p3', parent_id: 'b1', child_id: 'b2' },
+      ],
+      spouses: [],
+      entries: [{ id: 'e1', person_id: 'b1', title: '開雜貨店' }],
+      pets: [{ id: 'pet1', owner_person_id: 'b1' }],
+      households: [{ id: 'h1', person_ids: ['b1', 'b3'] }],
+    }
+    const links = [{ relation: 'same_person', person_a_id: 'a1', person_b_id: 'b1' }, { relation: 'same_person', person_a_id: 'a2', person_b_id: 'b2' }]
+    const r = resolveSamePerson(tree, links)
+    expect(r.people.map((p) => p.id)).toEqual(['a1', 'a2', 'b3'])
+    const a1 = r.people.find((p) => p.id === 'a1')
+    expect(a1.aliases).toEqual([{ id: 'b1', family_id: 'B', name: '林大明' }])
+    expect(a1.nicknames).toEqual(['阿明'])
+    expect(a1.tags).toEqual(['ADHD'])
+    const a2 = r.people.find((p) => p.id === 'a2')
+    expect(a2.nicknames).toEqual(['美美']) // b2 的名字「美美」已在小名裡,不重複
+    // b1 → a2 與 a1 → a2 去重成一條;b1 → b3 變 a1 → b3
+    expect(r.parentChild.map((x) => `${x.parent_id}>${x.child_id}`).sort()).toEqual(['a1>a2', 'a1>b3'])
+    expect(r.entries[0].person_id).toBe('a1')
+    expect(r.pets[0].owner_person_id).toBe('a1')
+    expect(r.households[0].person_ids).toEqual(['a1', 'b3'])
+    // 稱謂:a2 現在有 b3 這個(半)兄弟
+    const g = buildGraph({ people: r.people, parentChild: r.parentChild, spouses: r.spouses })
+    expect(computeRelationTerm('a2', 'b3', g)?.term).toMatch(/兄弟|哥哥|弟弟/)
+  })
+})
 
 const link = (over) => ({ id: 'L1', merged_family_id: 'M', person_a_id: 'a', person_b_id: 'b', created_at: '2026-01-01T00:00:00Z', created_by: null, ...over })
 

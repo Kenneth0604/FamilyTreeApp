@@ -1,7 +1,7 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react'
 import { supabase, isConfigured } from './supabase.js'
 import { buildGraph, computeAllRelationTerms } from './kinship/index.js'
-import { bridgeRows } from './merge.js'
+import { bridgeRows, resolveSamePerson, findSamePersonCandidates } from './merge.js'
 import { useToast } from './toast.jsx'
 
 /**
@@ -247,6 +247,7 @@ export function StoreProvider({ children }) {
   const [pets, setPets] = useState([])
   const [households, setHouseholds] = useState([])
   const [linkInvites, setLinkInvites] = useState([]) // 本家族尚未使用的合併連結碼(只有 editor 拿得到)
+  const [mergeLinks, setMergeLinks] = useState([]) // 合併樹的 family_links 原始列(橋接 + 同一人標記)
   const [ready, setReady] = useState(false)
   const [fatal, setFatal] = useState('')
   const [offline, setOffline] = useState(typeof navigator !== 'undefined' && navigator.onLine === false)
@@ -263,6 +264,7 @@ export function StoreProvider({ children }) {
     setEntries(snap.entries ?? [])
     setPets(snap.pets ?? [])
     setHouseholds(snap.households ?? [])
+    setMergeLinks(snap.links ?? [])
   }, [])
 
   const refresh = useCallback(async () => {
@@ -285,17 +287,19 @@ export function StoreProvider({ children }) {
         throwIf(tree.error)
         const t = tree.data || {}
         const bridges = bridgeRows(t.links ?? [], familyId)
-        snap = {
-          family: { ...fam.data, sources: t.source_families ?? [] },
-          members: mem.data ?? [],
-          people: t.people ?? [],
-          parentChild: [...(t.parent_child ?? []), ...bridges.parentChild],
-          spouses: [...(t.spouses ?? []), ...bridges.spouses],
-          entries: t.entries ?? [],
-          pets: t.pets ?? [],
-          households: t.households ?? [],
-          at: Date.now(),
-        }
+        // 同一人標記:把第二個來源的那個人併進第一個來源的人,雙方的親戚就接在同一張圖上
+        const resolved = resolveSamePerson(
+          {
+            people: t.people ?? [],
+            parentChild: [...(t.parent_child ?? []), ...bridges.parentChild],
+            spouses: [...(t.spouses ?? []), ...bridges.spouses],
+            entries: t.entries ?? [],
+            pets: t.pets ?? [],
+            households: t.households ?? [],
+          },
+          t.links ?? [],
+        )
+        snap = { family: { ...fam.data, sources: t.source_families ?? [] }, members: mem.data ?? [], ...resolved, links: t.links ?? [], at: Date.now() }
       } else {
         const [mem, ppl, pc, sp, en, pt, hh, cd, li] = await Promise.all([
           supabase.from('family_members').select('*').eq('family_id', familyId).order('joined_at'),
@@ -467,8 +471,8 @@ export function StoreProvider({ children }) {
   // 本機變更(含尚未同步的)也寫進快取,離線時關掉再開不會看到舊資料;family.id 對不上代表還是上一個家族的資料
   useEffect(() => {
     if (!ready || !familyId || family?.id !== familyId) return
-    writeJSON(cacheKey(familyId), { family, members, people, parentChild, spouses, entries, pets, households, at: Date.now() })
-  }, [ready, familyId, family, members, people, parentChild, spouses, entries, pets, households])
+    writeJSON(cacheKey(familyId), { family, members, people, parentChild, spouses, entries, pets, households, links: mergeLinks, at: Date.now() })
+  }, [ready, familyId, family, members, people, parentChild, spouses, entries, pets, households, mergeLinks])
 
   const retry = useCallback(() => setAttempt((n) => n + 1), [])
 
@@ -490,6 +494,13 @@ export function StoreProvider({ children }) {
   const advanced = Boolean(member?.advanced_terms)
   const canEdit = member?.role !== 'viewer'
   const isMerged = family?.kind === 'merged'
+  // 合併樹:任一來源家族的 editor 可以確認同一人 / 解除合併
+  const canManageMerge = useMemo(
+    () => isMerged && (family?.sources ?? []).some((s) => memberships?.some((m) => m.family_id === s.id && m.role !== 'viewer')),
+    [isMerged, family, memberships],
+  )
+  // 每次資料更新都重算:兩個來源家族有沒有同名(或小名相符)的人
+  const sameCandidates = useMemo(() => (isMerged ? findSamePersonCandidates(people, family?.sources, mergeLinks) : []), [isMerged, people, family, mergeLinks])
 
   const terms = useMemo(
     () => (viewpointId ? computeAllRelationTerms(viewpointId, graph, { advanced }) : new Map()),
@@ -704,6 +715,24 @@ export function StoreProvider({ children }) {
     [familyId, loadMemberships, switchFamily],
   )
 
+  const linkSamePerson = useCallback(
+    (aId, bId, same) =>
+      run(async () => {
+        const { error } = await supabase.rpc('link_same_person', { p_merged_family_id: familyId, p_person_a_id: aId, p_person_b_id: bId, p_same: same })
+        throwIf(error)
+      }),
+    [run, familyId],
+  )
+
+  const unlinkSamePerson = useCallback(
+    (linkId) =>
+      run(async () => {
+        const { error } = await supabase.rpc('unlink_same_person', { p_link_id: linkId })
+        throwIf(error)
+      }),
+    [run],
+  )
+
   const removeMerge = useCallback(async () => {
     const sources = family?.sources ?? []
     const { error } = await supabase.rpc('remove_family_merge', { p_merged_family_id: familyId })
@@ -780,6 +809,7 @@ export function StoreProvider({ children }) {
       memberships, membershipsError, retryMemberships: () => setMembershipAttempt((n) => n + 1),
       familyId, family, codes, member, members, canEdit, isMerged, switchFamily, createFamily, joinFamily, leaveFamily, renameFamily, regenerateInvite, regenerateViewCode,
       linkInvites, createLinkCode, revokeLinkCode, peekLinkCode, mergeWithCode, removeMerge,
+      mergeLinks, sameCandidates, canManageMerge, linkSamePerson, unlinkSamePerson,
       people, parentChild, spouses, entries, pets, households, graph, peopleById, nameOf, memberName,
       ready, fatal, retry, refresh, offline, syncing, pending: outbox.length, sync: flush,
       viewpointId, selfId, advanced, terms, termFor,
@@ -791,6 +821,7 @@ export function StoreProvider({ children }) {
     [
       authLoading, authUser, login, signup, logout, memberships, membershipsError, familyId, family, codes, member, members, canEdit, isMerged,
       linkInvites, createLinkCode, revokeLinkCode, peekLinkCode, mergeWithCode, removeMerge,
+      mergeLinks, sameCandidates, canManageMerge, linkSamePerson, unlinkSamePerson,
       switchFamily, createFamily, joinFamily, leaveFamily, renameFamily, regenerateInvite, regenerateViewCode, people, parentChild, spouses, entries,
       graph, peopleById, nameOf, memberName, ready, fatal, retry, refresh, offline, syncing, outbox.length, flush, viewpointId, selfId, advanced,
       terms, termFor, addPerson, updatePerson, deletePerson, addParentChild, removeParentChild, addSpouse, updateSpouse,

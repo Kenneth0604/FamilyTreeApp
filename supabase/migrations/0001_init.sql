@@ -392,6 +392,9 @@ create table if not exists public.family_links (
   check (person_a_id <> person_b_id)
 );
 create index if not exists family_links_merged_idx on public.family_links(merged_family_id);
+-- same_person:兩邊其實是同一個人(合併樹讀取時把 b 併進 a);not_same_person:確認過不是,同名提示不要再跳
+alter table public.family_links drop constraint if exists family_links_relation_check;
+alter table public.family_links add constraint family_links_relation_check check (relation in ('spouse', 'parent_child', 'same_person', 'not_same_person'));
 
 -- 連結碼(一次性):記錄「我這邊哪個人、要建立什麼關係」,等對方輸入碼來合併
 create table if not exists public.family_link_invites (
@@ -538,7 +541,65 @@ begin
 end $$;
 grant execute on function public.remove_family_merge(uuid) to authenticated;
 
--- 合併樹的全部資料一次拼好:兩個來源家族的人物 / 關係 / 紀事 / 寵物 / 小家庭 + 橋接關係。
+-- 標記兩個來源家族裡的兩個人是同一人(p_same = true)或確認不是(false,之後不再提示)。
+-- 正規化成 person_a 屬於第一個來源、person_b 屬於第二個來源;前端讀取時把 b 併進 a。一個人只能被標記為一個人的同一人。
+create or replace function public.link_same_person(p_merged_family_id uuid, p_person_a_id uuid, p_person_b_id uuid, p_same boolean)
+returns uuid language plpgsql security definer set search_path = public as $$
+declare
+  src       uuid[];
+  fa        uuid;
+  fb        uuid;
+  a         uuid;
+  b         uuid;
+  my_member uuid;
+  lid       uuid;
+begin
+  if auth.uid() is null then raise exception '請先登入'; end if;
+  if (select kind from public.families where id = p_merged_family_id) is distinct from 'merged' then raise exception '這不是合併家族樹'; end if;
+  if not exists (select 1 from public.family_merge_sources s where s.merged_family_id = p_merged_family_id and public.is_family_editor(s.source_family_id))
+    then raise exception '只有來源家族的可編輯成員才能確認同一人'; end if;
+  select array_agg(s.source_family_id order by f.created_at, f.id) into src
+    from public.family_merge_sources s join public.families f on f.id = s.source_family_id
+   where s.merged_family_id = p_merged_family_id;
+  select family_id into fa from public.people where id = p_person_a_id;
+  select family_id into fb from public.people where id = p_person_b_id;
+  if fa is null or fb is null or fa = fb or not (fa = any(src)) or not (fb = any(src)) then
+    raise exception '兩個人必須分別來自這棵合併樹的兩個來源家族';
+  end if;
+  if fa = src[1] then a := p_person_a_id; b := p_person_b_id; else a := p_person_b_id; b := p_person_a_id; end if;
+
+  delete from public.family_links
+   where merged_family_id = p_merged_family_id and relation in ('same_person', 'not_same_person')
+     and ((person_a_id = a and person_b_id = b) or (person_a_id = b and person_b_id = a));
+  if p_same and exists (
+    select 1 from public.family_links
+     where merged_family_id = p_merged_family_id and relation = 'same_person'
+       and (person_a_id in (a, b) or person_b_id in (a, b))
+  ) then raise exception '其中一人已經被標記為另一個人的同一人,請先取消那筆'; end if;
+
+  select id into my_member from public.family_members where auth_user_id = auth.uid() and family_id = any(src) limit 1;
+  insert into public.family_links (merged_family_id, person_a_id, person_b_id, relation, created_by)
+    values (p_merged_family_id, a, b, case when p_same then 'same_person' else 'not_same_person' end, my_member)
+    returning id into lid;
+  return lid;
+end $$;
+grant execute on function public.link_same_person(uuid, uuid, uuid, boolean) to authenticated;
+
+create or replace function public.unlink_same_person(p_link_id uuid)
+returns void language plpgsql security definer set search_path = public as $$
+declare
+  mid uuid;
+begin
+  if auth.uid() is null then raise exception '請先登入'; end if;
+  select merged_family_id into mid from public.family_links where id = p_link_id and relation in ('same_person', 'not_same_person');
+  if mid is null then raise exception '找不到這筆標記'; end if;
+  if not exists (select 1 from public.family_merge_sources s where s.merged_family_id = mid and public.is_family_editor(s.source_family_id))
+    then raise exception '只有來源家族的可編輯成員才能取消標記'; end if;
+  delete from public.family_links where id = p_link_id;
+end $$;
+grant execute on function public.unlink_same_person(uuid) to authenticated;
+
+-- 合併樹的全部資料一次拼好:兩個來源家族的人物 / 關係 / 紀事 / 寵物 / 小家庭 + 橋接關係(含同一人標記)。
 -- 唯一的跨家族讀取入口;只回傳 family_merge_sources 裡登記的來源。
 create or replace function public.get_merged_tree(p_merged_family_id uuid)
 returns jsonb language plpgsql stable security definer set search_path = public as $$
@@ -549,7 +610,7 @@ begin
   select array_agg(source_family_id) into src from public.family_merge_sources where merged_family_id = p_merged_family_id;
   if src is null then raise exception '這不是合併家族樹'; end if;
   return jsonb_build_object(
-    'source_families', coalesce((select jsonb_agg(jsonb_build_object('id', f.id, 'name', f.name) order by f.created_at) from public.families f where f.id = any(src)), '[]'::jsonb),
+    'source_families', coalesce((select jsonb_agg(jsonb_build_object('id', f.id, 'name', f.name) order by f.created_at, f.id) from public.families f where f.id = any(src)), '[]'::jsonb),
     'people',          coalesce((select jsonb_agg(to_jsonb(x) order by x.created_at) from public.people x where x.family_id = any(src)), '[]'::jsonb),
     'parent_child',    coalesce((select jsonb_agg(to_jsonb(x)) from public.parent_child x where x.family_id = any(src)), '[]'::jsonb),
     'spouses',         coalesce((select jsonb_agg(to_jsonb(x)) from public.spouses x where x.family_id = any(src)), '[]'::jsonb),

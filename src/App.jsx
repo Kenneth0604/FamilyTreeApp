@@ -12,6 +12,7 @@ import PersonDetail from './pages/PersonDetail.jsx'
 import PetForm from './pages/PetForm.jsx'
 import PetDetail from './pages/PetDetail.jsx'
 import Households from './pages/Households.jsx'
+import MergedMatches from './pages/MergedMatches.jsx'
 import Settings from './pages/Settings.jsx'
 
 export default function App() {
@@ -58,6 +59,7 @@ export default function App() {
         <Route path="pets/:id" element={<PetDetail />} />
         <Route path="pets/:id/edit" element={canEdit ? <PetForm /> : <Navigate to="/people" replace />} />
         <Route path="households" element={<Households />} />
+        <Route path="merged-matches" element={<MergedMatches />} />
         <Route path="settings" element={<Settings />} />
         <Route path="*" element={<Navigate to="/" replace />} />
       </Route>
