@@ -33,7 +33,7 @@ export default function PetStatsPanel({ pet }) {
   return (
     <section className="card p-4">
       <div className="mb-2 flex items-center justify-between">
-        <h2 className="section-title mb-0">寵物評分</h2>
+        <h2 className="section-title mb-0">讚讚寵物指數</h2>
         {canEdit && !draft && (
           <button onClick={() => setDraft({ ...stats })} className="text-sm text-primary">
             {rated.length ? '✎ 調整' : '＋ 評分'}
@@ -48,11 +48,11 @@ export default function PetStatsPanel({ pet }) {
           <div className="mb-3 flex items-center gap-3 rounded-2xl bg-surface-2 p-3">
             <div className="flex h-14 w-14 shrink-0 flex-col items-center justify-center rounded-2xl bg-accent text-white">
               <span className="text-xl font-black leading-none">{overall.score}</span>
-              <span className="text-[10px] leading-none opacity-80">綜合</span>
+              <span className="text-[10px] leading-none opacity-80">讚讚</span>
             </div>
             <div className="min-w-0 flex-1">
               <p className="text-sm font-semibold text-ink">
-                {overall.rank} 級 · {overall.title}
+                讚讚寵物指數 {overall.score} · {overall.rank} 級 {overall.title}
               </p>
               <p className="mt-0.5 text-xs text-muted">
                 最強 {overall.best.icon} {overall.best.label}
@@ -71,7 +71,7 @@ export default function PetStatsPanel({ pet }) {
 
       {draft && (
         <div className="space-y-3">
-          <p className="text-xs text-muted">勾選要評的項目,拉滑桿給 0–10 分。標「負面」的越高越糟,綜合評分會反過來算。</p>
+          <p className="text-xs text-muted">勾選要評的項目,拉滑桿給 0–10 分。標「負面」的越高越糟,指數會反過來算。</p>
           <div className="space-y-2">
             {PET_STATS.map((s) => {
               const on = Number.isFinite(draft[s.id])

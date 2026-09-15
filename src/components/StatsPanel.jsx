@@ -33,7 +33,7 @@ export default function StatsPanel({ person }) {
   return (
     <section className="card p-4">
       <div className="mb-2 flex items-center justify-between">
-        <h2 className="section-title mb-0">戰力與屬性</h2>
+        <h2 className="section-title mb-0">戰力與讚讚人指數</h2>
         {canEdit && !draft && (
           <button onClick={() => setDraft({ power, stats: { ...stats } })} className="text-sm text-primary">
             {rated.length ? '✎ 調整' : '＋ 評分'}
@@ -53,18 +53,18 @@ export default function StatsPanel({ person }) {
         </div>
       )}
 
-      {!draft && rated.length === 0 && <p className="text-xs text-muted">{canEdit ? `還沒有人幫 ${person.name} 評分。點「評分」,像遊戲角色一樣拉出有趣、有病、脾氣、酒量…的數值條。` : '尚無屬性評分'}</p>}
+      {!draft && rated.length === 0 && <p className="text-xs text-muted">{canEdit ? `還沒有人幫 ${person.name} 評分。點「評分」,像遊戲角色一樣拉出有趣、有病、脾氣、酒量…的數值條,算出這個人的讚讚人指數。` : '尚無讚讚人指數'}</p>}
 
       {!draft && overall && (
         <>
           <div className="mb-3 flex items-center gap-3 rounded-2xl bg-surface-2 p-3">
             <div className="flex h-14 w-14 shrink-0 flex-col items-center justify-center rounded-2xl bg-primary text-primary-fg">
               <span className="text-xl font-black leading-none">{overall.score}</span>
-              <span className="text-[10px] leading-none opacity-80">綜合</span>
+              <span className="text-[10px] leading-none opacity-80">讚讚</span>
             </div>
             <div className="min-w-0 flex-1">
               <p className="text-sm font-semibold text-ink">
-                {overall.rank} 級 · {overall.title}
+                讚讚人指數 {overall.score} · {overall.rank} 級 {overall.title}
               </p>
               <p className="mt-0.5 text-xs text-muted">
                 最強 {overall.best.icon} {overall.best.label}
@@ -94,7 +94,7 @@ export default function StatsPanel({ person }) {
             <input type="range" min="0" max="10" step="1" value={draft.power} onChange={(e) => setDraft({ ...draft, power: Number(e.target.value) })} className="mt-1.5 w-full accent-accent" />
             <p className="mt-1 text-[11px] text-muted">這個人在家族裡的份量。數字越大,樹狀圖上的卡片越大。</p>
           </div>
-          <p className="text-xs text-muted">勾選要評的屬性,拉滑桿給 0–10 分。沒勾的不會顯示,也不計入綜合評分。標「負面」的屬性分數越高越糟,綜合評分會反過來算。</p>
+          <p className="text-xs text-muted">勾選要評的屬性,拉滑桿給 0–10 分。沒勾的不會顯示,也不計入讚讚人指數。標「負面」的屬性分數越高越糟,指數會反過來算。</p>
           <div className="space-y-2">
             {STATS.map((s) => {
               const on = Number.isFinite(draft.stats[s.id])

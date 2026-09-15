@@ -221,6 +221,8 @@ input[type="date"], input[type="number"] {
 /* 卡片要能長按拖曳:關掉 iOS 長按預覽 / 文字選取,否則系統選單會蓋住畫面 */
 .tree-canvas .react-flow__node { -webkit-touch-callout: none; -webkit-user-select: none; user-select: none; }
 .tree-canvas .react-flow__node img { -webkit-touch-callout: none; pointer-events: none; }
+/* 小家庭虛線框:純裝飾,不攔截點擊 / 拖曳 */
+.react-flow__node-household { pointer-events: none !important; }
 /* 長按後拖曳中的卡片(用 filter 而不是 box-shadow,才不會蓋掉 ring) */
 .react-flow__node.person-dragging { z-index: 20 !important; }
 .react-flow__node.person-dragging > .card { filter: drop-shadow(0 12px 16px rgb(0 0 0 / 0.3)); }

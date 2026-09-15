@@ -6,7 +6,7 @@ import { layoutTree, NODE_W, NODE_H } from '../lib/treeLayout.js'
 import Avatar from '../components/Avatar.jsx'
 import TermBadge from '../components/TermBadge.jsx'
 import VesselEdge from '../components/VesselEdge.jsx'
-import { ageLabel, birthOrderLabel, powerScale, POWER_DEFAULT } from '../lib/format.js'
+import { ageLabel, birthOrderLabel, POWER_DEFAULT, STATS, VIEW_MODES, viewPresentation, scaleFromLevel, householdColor } from '../lib/format.js'
 
 const LONG_PRESS_MS = 350
 const MOVE_TOLERANCE = 8 // 長按前手指移動超過這個距離就當作是在平移畫布
@@ -16,8 +16,7 @@ const MOVE_TOLERANCE = 8 // 長按前手指移動超過這個距離就當作是�
  * 長按卡片後可拖曳移動;直接滑動則是平移畫布(不攔截)。React Flow 內建拖曳一按就動、會吃掉平移,所以自己處理。
  */
 const PersonNode = memo(function PersonNode({ id, data }) {
-  const { person, term, isViewpoint, isSelf, scale, onDragStart, onDrag, onDragEnd } = data
-  const power = Number.isFinite(person.power) ? person.power : POWER_DEFAULT
+  const { person, term, isViewpoint, isSelf, scale, badge, badgeStrong, tint, onDragStart, onDrag, onDragEnd } = data
   const { getZoom } = useReactFlow()
   const ref = useRef(null)
   const st = useRef(null) // { pointerId, x, y, timer, armed, moved }
@@ -92,11 +91,8 @@ const PersonNode = memo(function PersonNode({ id, data }) {
       className={`card relative flex select-none flex-col items-center gap-1.5 px-2 py-3 text-center transition-[transform,filter] ${isViewpoint ? 'ring-2 ring-primary' : ''} ${person.is_deceased ? 'opacity-80' : ''}`}
       style={{ width: NODE_W, height: NODE_H, transform: `scale(${scale})`, transformOrigin: 'top left' }}
     >
-      {power !== POWER_DEFAULT && (
-        <span className={`absolute right-1.5 top-1.5 rounded-full px-1.5 py-px text-[10px] font-bold ${power >= 7 ? 'bg-primary text-primary-fg' : 'bg-surface-2 text-muted'}`} title="戰力(家庭地位)">
-          {power >= 10 ? '👑' : '⚔'} {power}
-        </span>
-      )}
+      {tint && <span className="pointer-events-none absolute inset-x-0 top-0 h-1.5 rounded-t-2xl" style={{ background: tint }} />}
+      {badge && <span className={`absolute right-1.5 top-1.5 rounded-full px-1.5 py-px text-[10px] font-bold ${badgeStrong ? 'bg-primary text-primary-fg' : 'bg-surface-2 text-muted'}`}>{badge}</span>}
       <Handle type="target" position={Position.Top} id="top" />
       <Handle type="source" position={Position.Bottom} id="bottom" />
       <Handle type="source" position={Position.Right} id="right" />
@@ -131,8 +127,31 @@ const JunctionNode = memo(function JunctionNode() {
   )
 })
 
-const nodeTypes = { person: PersonNode, junction: JunctionNode }
+/** 小家庭:把成員卡片的外框用虛線圈起來,放在所有卡片後面、不吃任何點擊 */
+const HouseholdNode = memo(function HouseholdNode({ data }) {
+  return (
+    <div className="relative h-full w-full rounded-3xl" style={{ border: `2px dashed ${data.color}`, background: `${data.color}14` }}>
+      <span className="absolute left-3 top-1.5 text-[11px] font-semibold" style={{ color: data.color }}>
+        ⌂ {data.name}
+      </span>
+    </div>
+  )
+})
+
+const nodeTypes = { person: PersonNode, junction: JunctionNode, household: HouseholdNode }
 const edgeTypes = { vessel: VesselEdge }
+const HOUSEHOLD_PAD = 14
+
+/** 樹狀圖顯示方式(存在這台裝置) */
+const viewKey = (fid) => `familytree:view:${fid}`
+function readView(fid) {
+  try {
+    const v = JSON.parse(localStorage.getItem(viewKey(fid)) || 'null')
+    return v && VIEW_MODES.some((m) => m.id === v.mode) ? { mode: v.mode, stats: Array.isArray(v.stats) ? v.stats : [] } : { mode: 'default', stats: [] }
+  } catch {
+    return { mode: 'default', stats: [] }
+  }
+}
 
 /** 配偶 / 伴侶連線上的文字;樣式(顏色、是否乾枯)由 VesselEdge 依 status 決定 */
 const SPOUSE_LABEL = { partner: '伴侶', divorced: '離婚', ex_partner: '前伴侶' }
@@ -165,7 +184,7 @@ export default function Tree() {
 }
 
 function TreeCanvas() {
-  const { familyId, people, graph, terms, viewpointId, selfId, parentChild, spouses, peopleById, canEdit } = useStore()
+  const { familyId, people, graph, terms, viewpointId, selfId, parentChild, spouses, peopleById, canEdit, households = [] } = useStore()
   const navigate = useNavigate()
   const { fitView, setCenter } = useReactFlow()
 
@@ -177,6 +196,18 @@ function TreeCanvas() {
   useEffect(() => writeOverrides(familyId, overrides), [familyId, overrides])
   const [draggingId, setDraggingId] = useState(null)
   const suppressClickUntil = useRef(0)
+
+  // ---- 顯示方式 ----
+  const [view, setView] = useState(() => readView(familyId))
+  const [viewOpen, setViewOpen] = useState(false)
+  useEffect(() => setView(readView(familyId)), [familyId])
+  useEffect(() => {
+    try {
+      localStorage.setItem(viewKey(familyId), JSON.stringify(view))
+    } catch {
+      /* ignore */
+    }
+  }, [familyId, view])
 
   const positions = useMemo(() => {
     const out = new Map(layout.positions)
@@ -229,25 +260,71 @@ function TreeCanvas() {
     return out
   }, [parentChild, positions])
 
-  const nodes = useMemo(
-    () => [
-      ...people
+  // 每張卡片的實際尺寸與位置:依顯示方式縮放,並置中在原本的排版格子裡
+  const cards = useMemo(
+    () =>
+      people
         .filter((p) => positions.has(p.id))
         .map((p) => {
-          // 戰力越高卡片越大:實際節點尺寸跟著縮放,並置中在原本的排版格子裡
-          const s = powerScale(p.power)
+          const pres = view.mode === 'default' ? null : viewPresentation(p, view)
+          const s = pres ? scaleFromLevel(pres.level) : 1
+          const power = Number.isFinite(p.power) ? p.power : POWER_DEFAULT
           const slot = positions.get(p.id)
+          const w = NODE_W * s
+          const h = NODE_H * s
           return {
-            id: p.id,
-            type: 'person',
-            position: { x: slot.x + (NODE_W - NODE_W * s) / 2, y: slot.y + (NODE_H - NODE_H * s) / 2 },
-            style: { width: NODE_W * s, height: NODE_H * s },
-            className: draggingId === p.id ? 'person-dragging' : undefined,
-            data: { person: p, term: terms.get(p.id) ?? null, isViewpoint: p.id === viewpointId, isSelf: p.id === selfId, scale: s, onDragStart, onDrag, onDragEnd },
-            draggable: false,
-            selectable: false,
+            p,
+            s,
+            x: slot.x + (NODE_W - w) / 2,
+            y: slot.y + (NODE_H - h) / 2,
+            w,
+            h,
+            badge: pres ? pres.badge : power !== POWER_DEFAULT ? `${power >= 10 ? '👑' : '⚔'} ${power}` : '',
+            badgeStrong: pres ? (pres.level ?? 0) >= 0.7 : power >= 7,
+            tint: pres?.tint ?? null,
           }
         }),
+    [people, positions, view],
+  )
+
+  const householdNodes = useMemo(() => {
+    const byId = new Map(cards.map((c) => [c.p.id, c]))
+    return households
+      .map((hh) => {
+        const boxes = (hh.person_ids || []).map((id) => byId.get(id)).filter(Boolean)
+        if (!boxes.length) return null
+        const minX = Math.min(...boxes.map((b) => b.x)) - HOUSEHOLD_PAD
+        const minY = Math.min(...boxes.map((b) => b.y)) - HOUSEHOLD_PAD - 16 // 上方多留名稱的空間
+        const maxX = Math.max(...boxes.map((b) => b.x + b.w)) + HOUSEHOLD_PAD
+        const maxY = Math.max(...boxes.map((b) => b.y + b.h)) + HOUSEHOLD_PAD
+        return {
+          id: `household-${hh.id}`,
+          type: 'household',
+          position: { x: minX, y: minY },
+          style: { width: maxX - minX, height: maxY - minY },
+          zIndex: -1,
+          data: { name: hh.name, color: householdColor(hh.color) },
+          draggable: false,
+          selectable: false,
+          focusable: false,
+        }
+      })
+      .filter(Boolean)
+  }, [households, cards])
+
+  const nodes = useMemo(
+    () => [
+      ...householdNodes,
+      ...cards.map((c) => ({
+        id: c.p.id,
+        type: 'person',
+        position: { x: c.x, y: c.y },
+        style: { width: c.w, height: c.h },
+        className: draggingId === c.p.id ? 'person-dragging' : undefined,
+        data: { person: c.p, term: terms.get(c.p.id) ?? null, isViewpoint: c.p.id === viewpointId, isSelf: c.p.id === selfId, scale: c.s, badge: c.badge, badgeStrong: c.badgeStrong, tint: c.tint, onDragStart, onDrag, onDragEnd },
+        draggable: false,
+        selectable: false,
+      })),
       ...[...junctions.values()].map((j) => ({
         id: j.id,
         type: 'junction',
@@ -257,7 +334,7 @@ function TreeCanvas() {
         selectable: false,
       })),
     ],
-    [people, positions, terms, viewpointId, selfId, junctions, draggingId, onDragStart, onDrag, onDragEnd],
+    [cards, householdNodes, terms, viewpointId, selfId, junctions, draggingId, onDragStart, onDrag, onDragEnd],
   )
 
   const edges = useMemo(() => {
@@ -293,6 +370,9 @@ function TreeCanvas() {
     },
     [navigate],
   )
+
+  const toggleViewStat = (id) => setView((v) => ({ ...v, stats: v.stats.includes(id) ? v.stats.filter((x) => x !== id) : [...v.stats, id] }))
+  const currentMode = VIEW_MODES.find((m) => m.id === view.mode) || VIEW_MODES[0]
 
   // 以 viewpoint 為中心
   const focusViewpoint = useCallback(() => {
@@ -368,6 +448,12 @@ function TreeCanvas() {
               ↺ 重新排版
             </button>
           )}
+          <button onClick={() => setViewOpen((o) => !o)} className={`chip text-xs shadow-sm ${view.mode !== 'default' ? 'chip-active' : ''}`}>
+            👁 {view.mode === 'default' ? '顯示方式' : currentMode.label}
+          </button>
+          <Link to="/households" className="chip text-xs shadow-sm">
+            ⌂ 小家庭{households.length ? ` ${households.length}` : ''}
+          </Link>
         </div>
         {!viewpointId && (
           <Link to="/settings" className="pointer-events-auto rounded-xl bg-info-soft px-3 py-1.5 text-xs text-info shadow-sm">
@@ -375,6 +461,37 @@ function TreeCanvas() {
           </Link>
         )}
       </div>
+
+      {viewOpen && (
+        <div className="absolute inset-x-3 top-14 z-10 rounded-2xl bg-surface p-3 shadow-lg ring-1 ring-line">
+          <div className="mb-2 flex items-center justify-between">
+            <p className="text-sm font-semibold text-ink">顯示方式</p>
+            <button onClick={() => setViewOpen(false)} className="text-xs text-muted">
+              關閉
+            </button>
+          </div>
+          <div className="flex flex-wrap gap-1.5">
+            {VIEW_MODES.map((m) => (
+              <button key={m.id} onClick={() => setView((v) => ({ ...v, mode: m.id }))} className={`chip text-xs ${view.mode === m.id ? 'chip-active' : ''}`}>
+                {m.label}
+              </button>
+            ))}
+          </div>
+          <p className="mt-2 text-xs text-muted">{currentMode.hint}</p>
+          {view.mode === 'custom' && (
+            <div className="mt-2">
+              <p className="mb-1.5 text-xs text-muted">挑要看的屬性(可多選),卡片大小依這幾項的平均分數決定;負面屬性會反過來算。{view.stats.length === 0 && ' 還沒選任何屬性,大家一樣大。'}</p>
+              <div className="flex max-h-40 flex-wrap gap-1.5 overflow-y-auto">
+                {STATS.map((s) => (
+                  <button key={s.id} onClick={() => toggleViewStat(s.id)} className={`chip px-2.5 py-1 text-xs ${view.stats.includes(s.id) ? 'chip-active' : ''}`}>
+                    {s.icon} {s.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
+      )}
 
       <div className="pointer-events-none absolute inset-x-0 bottom-0 flex flex-col items-start gap-1.5 p-3">
         {draggingId ? (

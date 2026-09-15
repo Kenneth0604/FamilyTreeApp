@@ -23,7 +23,7 @@ const OUTBOX_KEY = 'familytree:outbox'
 const cacheKey = (fid) => `familytree:cache:${fid}`
 const POLL_MS = 60_000
 const MAX_TRIES = 10 // 有網路卻連續失敗這麼多次就放棄該筆,避免卡住整個佇列
-const WATCHED_TABLES = ['people', 'parent_child', 'spouses', 'person_entries', 'pets', 'family_members', 'families', 'family_codes']
+const WATCHED_TABLES = ['people', 'parent_child', 'spouses', 'person_entries', 'pets', 'households', 'family_members', 'families', 'family_codes']
 
 const AUTH_EMAIL_DOMAIN = 'familytree.invalid'
 const USERNAME_PATTERN = /^[a-zA-Z0-9_-]{2,30}$/
@@ -244,6 +244,7 @@ export function StoreProvider({ children }) {
   const [spouses, setSpouses] = useState([])
   const [entries, setEntries] = useState([]) // 生平紀事(整個家族一次載入)
   const [pets, setPets] = useState([])
+  const [households, setHouseholds] = useState([])
   const [ready, setReady] = useState(false)
   const [fatal, setFatal] = useState('')
   const [offline, setOffline] = useState(typeof navigator !== 'undefined' && navigator.onLine === false)
@@ -259,6 +260,7 @@ export function StoreProvider({ children }) {
     setSpouses(snap.spouses ?? [])
     setEntries(snap.entries ?? [])
     setPets(snap.pets ?? [])
+    setHouseholds(snap.households ?? [])
   }, [])
 
   const refresh = useCallback(async () => {
@@ -266,7 +268,7 @@ export function StoreProvider({ children }) {
     if (outboxRef.current.length > 0) return // 還有未同步的變更:不覆蓋本機狀態,flush 完成後會再抓
     setSyncing(true)
     try {
-      const [fam, mem, ppl, pc, sp, en, pt, cd] = await Promise.all([
+      const [fam, mem, ppl, pc, sp, en, pt, hh, cd] = await Promise.all([
         supabase.from('families').select('*').eq('id', familyId).maybeSingle(),
         supabase.from('family_members').select('*').eq('family_id', familyId).order('joined_at'),
         supabase.from('people').select('*').eq('family_id', familyId).order('created_at'),
@@ -274,12 +276,13 @@ export function StoreProvider({ children }) {
         supabase.from('spouses').select('*').eq('family_id', familyId),
         supabase.from('person_entries').select('*').eq('family_id', familyId).order('created_at'),
         supabase.from('pets').select('*').eq('family_id', familyId).order('created_at'),
+        supabase.from('households').select('*').eq('family_id', familyId).order('created_at'),
         // viewer 被 RLS 擋掉會拿到 null(不是錯誤)
         supabase.from('family_codes').select('*').eq('family_id', familyId).maybeSingle(),
       ])
-      for (const r of [fam, mem, ppl, pc, sp, en, pt]) throwIf(r.error)
+      for (const r of [fam, mem, ppl, pc, sp, en, pt, hh]) throwIf(r.error)
       if (outboxRef.current.length > 0) return // 抓取期間又有新變更:以本機為準
-      const snap = { family: fam.data, members: mem.data ?? [], people: ppl.data ?? [], parentChild: pc.data ?? [], spouses: sp.data ?? [], entries: en.data ?? [], pets: pt.data ?? [], at: Date.now() }
+      const snap = { family: fam.data, members: mem.data ?? [], people: ppl.data ?? [], parentChild: pc.data ?? [], spouses: sp.data ?? [], entries: en.data ?? [], pets: pt.data ?? [], households: hh.data ?? [], at: Date.now() }
       applySnapshot(snap)
       setCodes(cd.error ? null : cd.data)
       writeJSON(cacheKey(familyId), snap)
@@ -416,8 +419,8 @@ export function StoreProvider({ children }) {
   // 本機變更(含尚未同步的)也寫進快取,離線時關掉再開不會看到舊資料;family.id 對不上代表還是上一個家族的資料
   useEffect(() => {
     if (!ready || !familyId || family?.id !== familyId) return
-    writeJSON(cacheKey(familyId), { family, members, people, parentChild, spouses, entries, pets, at: Date.now() })
-  }, [ready, familyId, family, members, people, parentChild, spouses, entries, pets])
+    writeJSON(cacheKey(familyId), { family, members, people, parentChild, spouses, entries, pets, households, at: Date.now() })
+  }, [ready, familyId, family, members, people, parentChild, spouses, entries, pets, households])
 
   const retry = useCallback(() => setAttempt((n) => n + 1), [])
 
@@ -499,6 +502,7 @@ export function StoreProvider({ children }) {
         setSpouses((list) => list.filter((r) => r.person_a_id !== id && r.person_b_id !== id))
         setEntries((list) => list.filter((r) => r.person_id !== id))
         setPets((list) => list.map((p) => (p.owner_person_id === id ? { ...p, owner_person_id: null } : p)))
+        setHouseholds((list) => list.map((h) => (h.person_ids?.includes(id) ? { ...h, person_ids: h.person_ids.filter((x) => x !== id) } : h)))
       })
     },
     [mutate],
@@ -590,6 +594,28 @@ export function StoreProvider({ children }) {
     [mutate],
   )
 
+  const addHousehold = useCallback(
+    async (fields) => {
+      const row = { id: newId(), ...stamp(), created_by: member?.id ?? null, ...fields }
+      mutate({ type: 'insert', table: 'households', row }, () => setHouseholds((list) => [...list, { ...row, created_at: nowIso(), updated_at: nowIso() }]))
+      return row.id
+    },
+    [mutate, stamp, member],
+  )
+
+  const updateHousehold = useCallback(
+    async (id, fields) => {
+      const patch = { ...fields, updated_by: member?.id ?? null }
+      mutate({ type: 'update', table: 'households', rowId: id, row: patch }, () => setHouseholds((list) => list.map((h) => (h.id === id ? { ...h, ...patch, updated_at: nowIso() } : h))))
+    },
+    [mutate, member],
+  )
+
+  const deleteHousehold = useCallback(
+    async (id) => mutate({ type: 'delete', table: 'households', rowId: id }, () => setHouseholds((list) => list.filter((h) => h.id !== id))),
+    [mutate],
+  )
+
   const updateMember = useCallback(
     async (patch) => {
       if (!member) throw new Error('尚未載入成員資料')
@@ -653,11 +679,11 @@ export function StoreProvider({ children }) {
       authLoading, authUser, login, signup, logout,
       memberships, membershipsError, retryMemberships: () => setMembershipAttempt((n) => n + 1),
       familyId, family, codes, member, members, canEdit, switchFamily, createFamily, joinFamily, leaveFamily, renameFamily, regenerateInvite, regenerateViewCode,
-      people, parentChild, spouses, entries, pets, graph, peopleById, nameOf, memberName,
+      people, parentChild, spouses, entries, pets, households, graph, peopleById, nameOf, memberName,
       ready, fatal, retry, refresh, offline, syncing, pending: outbox.length, sync: flush,
       viewpointId, selfId, advanced, terms, termFor,
       addPerson, updatePerson, deletePerson, addParentChild, removeParentChild, addSpouse, updateSpouse, removeSpouse,
-      addEntry, updateEntry, deleteEntry, addPet, updatePet, deletePet,
+      addEntry, updateEntry, deleteEntry, addPet, updatePet, deletePet, addHousehold, updateHousehold, deleteHousehold,
       setViewpoint, setSelf, setAdvanced, setDisplayName,
       toast,
     }),
@@ -666,7 +692,8 @@ export function StoreProvider({ children }) {
       switchFamily, createFamily, joinFamily, leaveFamily, renameFamily, regenerateInvite, regenerateViewCode, people, parentChild, spouses, entries,
       graph, peopleById, nameOf, memberName, ready, fatal, retry, refresh, offline, syncing, outbox.length, flush, viewpointId, selfId, advanced,
       terms, termFor, addPerson, updatePerson, deletePerson, addParentChild, removeParentChild, addSpouse, updateSpouse,
-      removeSpouse, addEntry, updateEntry, deleteEntry, pets, addPet, updatePet, deletePet, setViewpoint, setSelf, setAdvanced, setDisplayName, toast,
+      removeSpouse, addEntry, updateEntry, deleteEntry, pets, addPet, updatePet, deletePet, households, addHousehold, updateHousehold, deleteHousehold,
+      setViewpoint, setSelf, setAdvanced, setDisplayName, toast,
     ],
   )
 

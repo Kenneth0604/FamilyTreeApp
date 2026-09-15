@@ -8,7 +8,7 @@ import PersonPicker from '../components/PersonPicker.jsx'
 import LifeEntries from '../components/LifeEntries.jsx'
 import StatsPanel from '../components/StatsPanel.jsx'
 import PetCard from '../components/PetCard.jsx'
-import { ageLabel, birthLabel, birthOrderLabel, GENDER_LABEL, SPOUSE_STATUS_LABEL, relativeTime } from '../lib/format.js'
+import { ageLabel, birthLabel, birthOrderLabel, GENDER_LABEL, SPOUSE_STATUS_LABEL, POLITICS_BY_ID, relativeTime } from '../lib/format.js'
 import { computeRelationTerm } from '../lib/kinship/index.js'
 import { compareSiblings } from '../lib/kinship/birth.js'
 
@@ -130,9 +130,15 @@ export default function PersonDetail() {
             </dl>
           </div>
         </div>
-        {person.tags?.length > 0 && (
+        {(person.tags?.length > 0 || person.politics) && (
           <div className="mt-3 flex flex-wrap gap-1.5">
-            {person.tags.map((t) => (
+            {POLITICS_BY_ID[person.politics] && (
+              <span className="inline-flex items-center gap-1 rounded-full bg-surface-2 px-2.5 py-0.5 text-xs font-medium text-ink">
+                <span className="h-2.5 w-2.5 rounded-full" style={{ background: POLITICS_BY_ID[person.politics].color }} />
+                {POLITICS_BY_ID[person.politics].label}
+              </span>
+            )}
+            {person.tags?.map((t) => (
               <span key={t} className="rounded-full bg-accent-soft px-2.5 py-0.5 text-xs font-medium text-accent">
                 #{t}
               </span>

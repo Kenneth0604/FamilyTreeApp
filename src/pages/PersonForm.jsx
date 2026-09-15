@@ -7,7 +7,7 @@ import PersonPicker from '../components/PersonPicker.jsx'
 import Avatar from '../components/Avatar.jsx'
 import { parseBirth } from '../lib/kinship/birth.js'
 import { isActiveSpouse } from '../lib/kinship/graph.js'
-import { SPOUSE_STATUS_LABEL, birthOrderLabel, parseList, toPartialDate } from '../lib/format.js'
+import { SPOUSE_STATUS_LABEL, POLITICS, birthOrderLabel, parseList, toPartialDate } from '../lib/format.js'
 
 const REL = [
   { id: 'parent', label: '父母', desc: '新成員是這個人的爸爸 / 媽媽' },
@@ -30,6 +30,7 @@ export default function PersonForm() {
   const [name, setName] = useState('')
   const [nicknames, setNicknames] = useState('')
   const [tags, setTags] = useState('')
+  const [politics, setPolitics] = useState(null)
   const [gender, setGender] = useState('unspecified')
   const [year, setYear] = useState('')
   const [month, setMonth] = useState('')
@@ -52,6 +53,7 @@ export default function PersonForm() {
       setName(editing.name)
       setNicknames((editing.nicknames || []).join('、'))
       setTags((editing.tags || []).join('、'))
+      setPolitics(editing.politics || null)
       setGender(editing.gender)
       const b = parseBirth(editing.birth_date)
       setYear(b ? String(b.y) : '')
@@ -95,6 +97,7 @@ export default function PersonForm() {
       name: name.trim(),
       nicknames: parseList(nicknames),
       tags: parseList(tags),
+      politics,
       gender,
       birth_date: toPartialDate(year, month, day),
       birth_order: birthOrder ? Number(birthOrder) : null,
@@ -251,6 +254,21 @@ export default function PersonForm() {
           <label className="label">標籤(可多個)</label>
           <input value={tags} onChange={(e) => setTags(e.target.value)} className="input" placeholder="例如:ADHD、左撇子、素食" />
           <p className="mt-1 text-xs text-muted">自由輸入,用「、」或逗號分隔。會以 #標籤 顯示在詳細頁,搜尋時也找得到。</p>
+        </div>
+        <div>
+          <label className="label">政治立場</label>
+          <div className="flex flex-wrap gap-1.5">
+            <button type="button" onClick={() => setPolitics(null)} className={`chip ${politics === null ? 'chip-active' : ''}`}>
+              不標示
+            </button>
+            {POLITICS.map((p) => (
+              <button key={p.id} type="button" onClick={() => setPolitics(p.id)} className={`chip gap-1.5 ${politics === p.id ? 'chip-active' : ''}`}>
+                <span className="h-3 w-3 rounded-full" style={{ background: p.color }} />
+                {p.label}
+              </button>
+            ))}
+          </div>
+          <p className="mt-1 text-xs text-muted">樹狀圖的顯示方式切到「政治立場」時,卡片頂端會用這個顏色標示。</p>
         </div>
         <div>
           <label className="label">性別</label>

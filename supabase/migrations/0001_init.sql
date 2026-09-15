@@ -9,6 +9,7 @@
 --   people          家族樹上的每一個人(大多數沒有帳號;nicknames 小名、tags 自訂標籤、birth_order 排行、stats 遊戲式屬性分數、power 戰力 / 家庭地位)
 --   person_entries  生平紀事:每人多筆履歷式條列(職業 / 學歷 / 事蹟 / 健康疾病 / 居住地 / 榮譽 / 其他),含起迄時間
 --   pets            寵物(名字、品種、主人、評分)
+--   households      小家庭:一群人的 id 陣列 + 名稱 / 顏色,樹狀圖用虛線圈起來
 --   parent_child    親子邊(有方向)
 --   spouses         配偶 / 伴侶邊(無方向;married / widowed / partner 未婚伴侶 / divorced / ex_partner 前伴侶)
 -- 兄弟姊妹、叔伯、堂表…全部由前端的稱謂引擎以最短路徑推算,不另外儲存。
@@ -112,6 +113,8 @@ alter table public.people add column if not exists nicknames text[] not null def
 alter table public.people add column if not exists tags text[] not null default '{}';
 -- 遊戲角色式屬性:{ 屬性 id: 0..10 },沒評的不放
 alter table public.people add column if not exists stats jsonb not null default '{}'::jsonb;
+-- 政治立場:blue / green / white,null = 不標示
+alter table public.people add column if not exists politics text check (politics is null or politics in ('blue', 'green', 'white'));
 -- 兄弟姊妹排行(1 = 老大);不知道實際年齡時用來判斷長幼
 alter table public.people add column if not exists birth_order smallint check (birth_order is null or birth_order between 1 and 99);
 -- 戰力(家庭地位)0..10,預設 5;數字越大樹狀圖卡片越大
@@ -163,6 +166,20 @@ create table if not exists public.pets (
 create index if not exists pets_family_idx on public.pets(family_id);
 create index if not exists pets_owner_idx  on public.pets(owner_person_id);
 
+-- 小家庭:圈選一群同住 / 同一戶的人,樹狀圖用虛線框起來
+create table if not exists public.households (
+  id           uuid primary key default gen_random_uuid(),
+  family_id    uuid not null references public.families(id) on delete cascade,
+  name         text not null check (length(trim(name)) > 0),
+  color        text not null default 'primary',
+  person_ids   uuid[] not null default '{}',
+  created_by   uuid references public.family_members(id) on delete set null,
+  updated_by   uuid references public.family_members(id) on delete set null,
+  created_at   timestamptz not null default now(),
+  updated_at   timestamptz not null default now()
+);
+create index if not exists households_family_idx on public.households(family_id);
+
 create index if not exists people_family_idx        on public.people(family_id);
 create index if not exists parent_child_family_idx  on public.parent_child(family_id);
 create index if not exists parent_child_child_idx   on public.parent_child(child_id);
@@ -193,6 +210,10 @@ create trigger person_entries_touch before update on public.person_entries
 
 drop trigger if exists pets_touch on public.pets;
 create trigger pets_touch before update on public.pets
+  for each row execute function public.touch_updated_at();
+
+drop trigger if exists households_touch on public.households;
+create trigger households_touch before update on public.households
   for each row execute function public.touch_updated_at();
 
 -- ----------------------------------------------------------------------------
@@ -345,6 +366,7 @@ alter table public.parent_child   enable row level security;
 alter table public.spouses        enable row level security;
 alter table public.person_entries enable row level security;
 alter table public.pets           enable row level security;
+alter table public.households     enable row level security;
 
 drop policy if exists "families member select" on public.families;
 drop policy if exists "families member update" on public.families;
@@ -374,7 +396,7 @@ create policy "members delete own" on public.family_members for delete to authen
 do $$
 declare t text;
 begin
-  foreach t in array array['people', 'parent_child', 'spouses', 'person_entries', 'pets'] loop
+  foreach t in array array['people', 'parent_child', 'spouses', 'person_entries', 'pets', 'households'] loop
     execute format('drop policy if exists %I on public.%I', t || ' member all', t);
     execute format('drop policy if exists %I on public.%I', t || ' member select', t);
     execute format('drop policy if exists %I on public.%I', t || ' editor insert', t);
@@ -431,7 +453,7 @@ grant execute on function public.keep_alive(text) to anon, authenticated;
 do $$
 declare t text;
 begin
-  foreach t in array array['families', 'family_codes', 'family_members', 'people', 'parent_child', 'spouses', 'person_entries', 'pets'] loop
+  foreach t in array array['families', 'family_codes', 'family_members', 'people', 'parent_child', 'spouses', 'person_entries', 'pets', 'households'] loop
     begin
       execute format('alter publication supabase_realtime add table public.%I', t);
     exception when duplicate_object then

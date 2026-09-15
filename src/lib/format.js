@@ -167,6 +167,64 @@ export function overallRating(stats, catalog = STATS, ranks = RANKS) {
   return { score, rank, title, count: items.length, best: sorted[0], worst: sorted.length > 1 ? sorted[sorted.length - 1] : null }
 }
 
+// ---- 政治立場 ----
+export const POLITICS = [
+  { id: 'blue', label: '藍', color: '#3b82f6' },
+  { id: 'green', label: '綠', color: '#16a34a' },
+  { id: 'white', label: '白', color: '#22c1c3' },
+]
+export const POLITICS_BY_ID = Object.fromEntries(POLITICS.map((p) => [p.id, p]))
+
+// ---- 小家庭 ----
+export const HOUSEHOLD_COLORS = [
+  { id: 'primary', label: '粉', color: '#e86aa8' },
+  { id: 'accent', label: '紫', color: '#a78bfa' },
+  { id: 'blue', label: '藍', color: '#60a5fa' },
+  { id: 'green', label: '綠', color: '#34d399' },
+  { id: 'orange', label: '橘', color: '#fb923c' },
+  { id: 'teal', label: '青', color: '#2dd4bf' },
+]
+export const householdColor = (id) => (HOUSEHOLD_COLORS.find((c) => c.id === id) || HOUSEHOLD_COLORS[0]).color
+
+// ---- 樹狀圖顯示方式 ----
+export const VIEW_MODES = [
+  { id: 'default', label: '預設', hint: '大家一樣大' },
+  { id: 'power', label: '家庭地位', hint: '戰力越高卡片越大' },
+  { id: 'rating', label: '讚讚人指數', hint: '指數越高卡片越大' },
+  { id: 'politics', label: '政治立場', hint: '卡片頂端用藍 / 綠 / 白標色' },
+  { id: 'custom', label: '自訂', hint: '挑幾項屬性,依它們的平均決定大小' },
+]
+
+/**
+ * 依顯示方式算出某個人的呈現:level 0–1(決定大小,null = 沒資料)、badge 文字、tint 顏色
+ * view = { mode, stats: [屬性 id] }
+ */
+export function viewPresentation(person, view) {
+  const mode = view?.mode || 'default'
+  if (mode === 'power') {
+    const p = Number.isFinite(person.power) ? person.power : POWER_DEFAULT
+    return { level: p / 10, badge: `${p >= 10 ? '👑' : '⚔'} ${p}`, tint: null }
+  }
+  if (mode === 'rating') {
+    const r = overallRating(person.stats)
+    return r ? { level: r.score / 100, badge: `👍 ${r.score}`, tint: null } : { level: null, badge: '', tint: null }
+  }
+  if (mode === 'politics') {
+    const pol = POLITICS_BY_ID[person.politics]
+    return { level: null, badge: pol ? pol.label : '', tint: pol?.color ?? null }
+  }
+  if (mode === 'custom') {
+    const ids = view?.stats?.length ? view.stats : []
+    const vals = ids.map((id) => STAT_BY_ID[id]).filter((s) => s && Number.isFinite(person.stats?.[s.id])).map((s) => effectiveStat(s, person.stats[s.id]))
+    if (!vals.length) return { level: null, badge: '', tint: null }
+    const mean = vals.reduce((a, b) => a + b, 0) / vals.length
+    return { level: mean / 10, badge: `${Math.round(mean * 10)}`, tint: null }
+  }
+  return { level: null, badge: '', tint: null }
+}
+/** 大小:0 → 0.8、1 → 1.2;沒資料維持 1 */
+export const scaleFromLevel = (level) => (level == null ? 1 : 0.8 + level * 0.4)
+
 // ---- 寵物 ----
 export const PET_SPECIES = [
   { id: 'dog', label: '狗', icon: '🐶' },
