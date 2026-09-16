@@ -6,7 +6,7 @@ import { layoutTree, layoutRadial, NODE_W, NODE_H, GAP_Y } from '../lib/treeLayo
 import Avatar from '../components/Avatar.jsx'
 import TermBadge from '../components/TermBadge.jsx'
 import VesselEdge from '../components/VesselEdge.jsx'
-import { ageLabel, birthOrderLabel, POWER_DEFAULT, totalPower, powerIcon, STATS, VIEW_MODES, viewPresentation, scaleFromLevel, householdColor } from '../lib/format.js'
+import { ageLabel, birthOrderLabel, displayName, POWER_DEFAULT, totalPower, powerIcon, STATS, VIEW_MODES, viewPresentation, scaleFromLevel, householdColor } from '../lib/format.js'
 import { unionOutline } from '../lib/outline.js'
 import { isActiveSpouse } from '../lib/kinship/graph.js'
 
@@ -32,7 +32,7 @@ const PersonNode = memo(function PersonNode({ data }) {
       <Handle type="target" position={Position.Left} id="left" />
       <Avatar person={person} size="lg" />
       <div className="line-clamp-2 w-full break-words text-center text-sm font-semibold leading-tight text-ink">
-        {person.name}
+        {displayName(person)}
         {person.is_deceased && <span className="ml-0.5 text-xs text-muted">†</span>}
       </div>
       {person.nicknames?.length > 0 && <div className="-mt-1 w-full truncate text-[11px] text-muted">{person.nicknames.join('、')}</div>}
@@ -734,7 +734,7 @@ function TreeCanvas() {
             <Avatar person={menuPerson} size="md" />
             <div className="min-w-0 flex-1">
               <p className="truncate text-sm font-semibold text-ink">
-                {menuPerson.name}
+                {displayName(menuPerson)}
                 {menuPerson.nicknames?.length > 0 && <span className="ml-1 text-xs font-normal text-muted">{menuPerson.nicknames.join('、')}</span>}
               </p>
               <div className="mt-0.5 flex items-center gap-1.5 text-xs text-muted">
@@ -757,14 +757,14 @@ function TreeCanvas() {
                 </Link>
               ))}
           </div>
-          {canEdit && <p className="mt-2 text-[11px] text-muted">新增的人會直接以「{menuPerson.name}」為基準建立關係。</p>}
+          {canEdit && <p className="mt-2 text-[11px] text-muted">新增的人會直接以「{displayName(menuPerson)}」為基準建立關係。</p>}
         </div>
       )}
 
       <div className="pointer-events-none absolute inset-x-0 bottom-0 flex flex-col items-start gap-1.5 p-3">
         {layoutMode && (
           <p className="pointer-events-auto inline-block rounded-xl bg-accent-soft px-3 py-1.5 text-xs text-accent shadow-sm">
-            {draggingId ? '拖曳中 · 放開即完成' : selectedId ? `已選取「${peopleById.get(selectedId)?.name ?? ''}」· 按住拖曳移動,點其他卡片切換` : '點一下卡片選取,再按住拖曳移動'}
+            {draggingId ? '拖曳中 · 放開即完成' : selectedId ? `已選取「${displayName(peopleById.get(selectedId))}」· 按住拖曳移動,點其他卡片切換` : '點一下卡片選取,再按住拖曳移動'}
           </p>
         )}
         {layout.unlinked.length > 0 && viewpointId && (

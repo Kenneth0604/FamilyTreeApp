@@ -88,7 +88,7 @@ npm test
 | --- | --- |
 | `families` | id, name, invite_code(唯一、可重新產生) |
 | `family_members` | 帳號 × 家族的身分:display_name、self_person_id、viewpoint_person_id、advanced_terms |
-| `people` | name、nicknames(text[])、tags(text[])、gender(male / female / unspecified)、birth_date(文字,`YYYY` / `YYYY-MM` / `YYYY-MM-DD` 或 null)、birth_order(排行,1 = 老大;生日分不出長幼時用)、is_deceased、death_date(逝世日期,格式同 birth_date)、death_age(不確定日期時填的大概歲數:`85` / `80-90` / `80多`)、avatar_url、note、stats(jsonb,{屬性 id: 0–10})、power(0–10 戰力)、created_by / updated_by / updated_at |
+| `people` | name(本名)、married_surname(冠夫姓,顯示成「夫姓 + 本名」,表單會依現任配偶的姓給建議)、nicknames(text[])、tags(text[])、gender(male / female / unspecified)、birth_date(文字,`YYYY` / `YYYY-MM` / `YYYY-MM-DD` 或 null)、birth_order(排行,1 = 老大;生日分不出長幼時用)、is_deceased、death_date(逝世日期,格式同 birth_date)、death_age(不確定日期時填的大概歲數:`85` / `80-90` / `80多`)、avatar_url、note、stats(jsonb,{屬性 id: 0–10})、power(0–10 戰力)、created_by / updated_by / updated_at |
 | `parent_child` | parent_id → child_id |
 | `spouses` | person_a_id、person_b_id、status(married / widowed / partner 未婚伴侶 / divorced / ex_partner 前伴侶);已結束的關係(divorced / ex_partner)稱謂推算不走、樹狀圖不並排,但仍可有共同子女 |
 | `households` | 小家庭:name、color、person_ids(uuid[]) |

@@ -3,7 +3,7 @@ import { Link } from 'react-router-dom'
 import { useStore } from '../lib/store.jsx'
 import { useToast } from '../lib/toast.jsx'
 import Avatar from '../components/Avatar.jsx'
-import { HOUSEHOLD_COLORS, householdColor } from '../lib/format.js'
+import { HOUSEHOLD_COLORS, householdColor, displayName } from '../lib/format.js'
 
 /** 小家庭:圈選一群同住的人,樹狀圖上用虛線框起來 */
 export default function Households() {
@@ -13,10 +13,10 @@ export default function Households() {
   const [busy, setBusy] = useState(false)
   const [q, setQ] = useState('')
 
-  const sortedPeople = useMemo(() => [...people].sort((a, b) => a.name.localeCompare(b.name, 'zh-Hant')), [people])
+  const sortedPeople = useMemo(() => [...people].sort((a, b) => displayName(a).localeCompare(displayName(b), 'zh-Hant')), [people])
   const filtered = useMemo(() => {
     const kw = q.trim().toLowerCase()
-    return kw ? sortedPeople.filter((p) => p.name.toLowerCase().includes(kw) || (p.nicknames || []).some((n) => n.toLowerCase().includes(kw))) : sortedPeople
+    return kw ? sortedPeople.filter((p) => displayName(p).toLowerCase().includes(kw) || (p.nicknames || []).some((n) => n.toLowerCase().includes(kw))) : sortedPeople
   }, [sortedPeople, q])
 
   const startNew = () => setForm({ name: '', color: HOUSEHOLD_COLORS[(households.length || 0) % HOUSEHOLD_COLORS.length].id, ids: new Set() })
@@ -93,7 +93,7 @@ export default function Households() {
                 {members.map((p) => (
                   <Link key={p.id} to={`/people/${p.id}`} className="flex items-center gap-1 rounded-full bg-surface-2 py-0.5 pl-0.5 pr-2 text-xs text-ink">
                     <Avatar person={p} size="sm" className="h-5 w-5 text-[10px]" />
-                    {p.name}
+                    {displayName(p)}
                   </Link>
                 ))}
                 {members.length === 0 && <span className="text-xs text-muted">成員都已被刪除</span>}
@@ -139,7 +139,7 @@ export default function Households() {
                   <label key={p.id} className={`flex items-center gap-2 rounded-xl px-2 py-1.5 text-sm text-ink ${on ? 'bg-surface-2' : ''}`}>
                     <input type="checkbox" checked={on} onChange={() => toggle(p.id)} className="h-4 w-4 accent-primary" />
                     <Avatar person={p} size="sm" />
-                    <span className="truncate">{p.name}</span>
+                    <span className="truncate">{displayName(p)}</span>
                     {p.nicknames?.length > 0 && <span className="truncate text-xs text-muted">{p.nicknames.join('、')}</span>}
                   </label>
                 )

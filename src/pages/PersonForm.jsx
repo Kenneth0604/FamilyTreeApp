@@ -7,7 +7,7 @@ import PersonPicker from '../components/PersonPicker.jsx'
 import Avatar from '../components/Avatar.jsx'
 import { parseBirth } from '../lib/kinship/birth.js'
 import { isActiveSpouse } from '../lib/kinship/graph.js'
-import { SPOUSE_STATUS_LABEL, POLITICS, birthOrderLabel, parseList, toPartialDate, parseDeathAge, lifespanPrefix } from '../lib/format.js'
+import { SPOUSE_STATUS_LABEL, POLITICS, birthOrderLabel, parseList, toPartialDate, parseDeathAge, lifespanPrefix, surnameOf } from '../lib/format.js'
 
 const REL = [
   { id: 'parent', label: '父母', desc: '新成員是這個人的爸爸 / 媽媽' },
@@ -28,6 +28,7 @@ export default function PersonForm() {
 
   // ----- 基本欄位 -----
   const [name, setName] = useState('')
+  const [marriedSurname, setMarriedSurname] = useState('')
   const [nicknames, setNicknames] = useState('')
   const [tags, setTags] = useState('')
   const [politics, setPolitics] = useState(null)
@@ -56,6 +57,7 @@ export default function PersonForm() {
   useEffect(() => {
     if (editing) {
       setName(editing.name)
+      setMarriedSurname(editing.married_surname || '')
       setNicknames((editing.nicknames || []).join('、'))
       setTags((editing.tags || []).join('、'))
       setPolitics(editing.politics || null)
@@ -97,6 +99,15 @@ export default function PersonForm() {
     setCoChildIds(relType === 'spouse' && isActiveSpouse(spouseStatus) ? anchorChildren.filter((c) => (graph.parentsOf.get(c) || []).length < 2) : [])
   }, [relType, spouseStatus, anchorChildren, graph])
 
+  // 冠夫姓的建議:編輯時看這個人的現任配偶;新增配偶時看對方(anchor)
+  const surnameSuggestions = useMemo(() => {
+    const ids = editing
+      ? (graph.spousesOf.get(editing.id) || []).filter((s) => isActiveSpouse(s.status)).map((s) => s.id)
+      : relType === 'spouse' && anchorId && isActiveSpouse(spouseStatus)
+        ? [anchorId]
+        : []
+    return [...new Set(ids.map((sid) => surnameOf(peopleById.get(sid)?.name)).filter(Boolean))]
+  }, [editing, graph, relType, anchorId, spouseStatus, peopleById])
   const needsPlaceholder = isNew && relType === 'sibling' && anchorId && anchorParents.length === 0
   const hasRelation = isNew && people.length > 0
 
@@ -113,6 +124,7 @@ export default function PersonForm() {
 
     const fields = {
       name: name.trim(),
+      married_surname: marriedSurname.trim() || null,
       nicknames: parseList(nicknames),
       tags: parseList(tags),
       politics,
@@ -289,7 +301,26 @@ export default function PersonForm() {
         </div>
         <div>
           <label className="label">姓名 *</label>
-          <input value={name} onChange={(e) => setName(e.target.value)} className="input" placeholder="姓名或稱呼" required autoFocus={isNew} />
+          <input value={name} onChange={(e) => setName(e.target.value)} className="input" placeholder="姓名或稱呼(本名)" required autoFocus={isNew} />
+        </div>
+        <div>
+          <label className="label">冠夫姓(可不填)</label>
+          <div className="flex flex-wrap items-center gap-2">
+            <input value={marriedSurname} onChange={(e) => setMarriedSurname(e.target.value)} className="input w-28" placeholder="例如 王" maxLength={10} />
+            {surnameSuggestions.map((s) => (
+              <button key={s} type="button" onClick={() => setMarriedSurname(s)} className={`chip text-xs ${marriedSurname === s ? 'chip-active' : ''}`}>
+                冠「{s}」
+              </button>
+            ))}
+            {marriedSurname.trim() && (
+              <button type="button" onClick={() => setMarriedSurname('')} className="text-xs text-muted">
+                清除
+              </button>
+            )}
+          </div>
+          <p className="mt-1 text-xs text-muted">
+            {marriedSurname.trim() && name.trim() ? `會顯示成「${marriedSurname.trim()}${name.trim()}」,本名仍是「${name.trim()}」。` : '姓名欄填本名,這裡填配偶的姓,樹狀圖和名單會顯示成「夫姓 + 本名」,例如 王陳美玲。'}
+          </p>
         </div>
         <div>
           <label className="label">小名 / 別名(可多個)</label>

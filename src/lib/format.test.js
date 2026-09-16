@@ -1,5 +1,19 @@
 import { describe, it, expect } from 'vitest'
-import { parseDeathAge, lifespan, ageLabel, longevityBonus, totalPower, viewPresentation } from './format.js'
+import { parseDeathAge, lifespan, ageLabel, longevityBonus, totalPower, viewPresentation, displayName, surnameOf } from './format.js'
+
+describe('format.displayName / surnameOf(冠夫姓)', () => {
+  it('冠夫姓接在本名前;沒填就是本名', () => {
+    expect(displayName({ name: '陳美玲', married_surname: '王' })).toBe('王陳美玲')
+    expect(displayName({ name: '陳美玲', married_surname: ' ' })).toBe('陳美玲')
+    expect(displayName({ name: '陳美玲' })).toBe('陳美玲')
+    expect(displayName(null)).toBe('')
+  })
+  it('配偶的姓:中文取第一個字,英文取最後一個字組', () => {
+    expect(surnameOf('王大明')).toBe('王')
+    expect(surnameOf('John Smith')).toBe('Smith')
+    expect(surnameOf('')).toBe('')
+  })
+})
 
 describe('format.viewPresentation 年齡', () => {
   it('依歲數決定大小,已故者用享壽並加 †,沒資料維持原大小', () => {

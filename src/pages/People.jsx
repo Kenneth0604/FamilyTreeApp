@@ -3,7 +3,7 @@ import { Link } from 'react-router-dom'
 import { useStore } from '../lib/store.jsx'
 import PersonCard from '../components/PersonCard.jsx'
 import PetCard from '../components/PetCard.jsx'
-import { generationLabel, PET_SPECIES_BY_ID } from '../lib/format.js'
+import { generationLabel, displayName, PET_SPECIES_BY_ID } from '../lib/format.js'
 import { compareAge } from '../lib/kinship/birth.js'
 
 /** 成員列表底下的寵物區 */
@@ -49,7 +49,7 @@ export default function People() {
     const filtered = people.filter(
       (p) =>
         !kw ||
-        p.name.toLowerCase().includes(kw) ||
+        displayName(p).toLowerCase().includes(kw) ||
         (p.nicknames || []).some((n) => n.toLowerCase().includes(kw)) ||
         (p.tags || []).some((t) => t.toLowerCase().includes(kw)) ||
         (termFor(p.id)?.term || '').includes(kw) ||

@@ -2,7 +2,7 @@ import { useMemo, useState } from 'react'
 import { useStore } from '../lib/store.jsx'
 import Avatar from './Avatar.jsx'
 import TermBadge from './TermBadge.jsx'
-import { ageLabel } from '../lib/format.js'
+import { ageLabel, displayName } from '../lib/format.js'
 
 /**
  * 可搜尋的成員選擇器(列出樹上所有人)
@@ -21,8 +21,8 @@ export default function PersonPicker({ value, onChange, exclude = [], allowNone 
     const kw = q.trim().toLowerCase()
     return people
       .filter((p) => !ex.has(p.id))
-      .filter((p) => !kw || p.name.toLowerCase().includes(kw) || (termFor(p.id)?.term || '').includes(kw))
-      .sort((a, b) => a.name.localeCompare(b.name, 'zh-Hant'))
+      .filter((p) => !kw || displayName(p).toLowerCase().includes(kw) || (termFor(p.id)?.term || '').includes(kw))
+      .sort((a, b) => displayName(a).localeCompare(displayName(b), 'zh-Hant'))
   }, [people, exclude, q, termFor])
 
   const selected = people.find((p) => p.id === value) ?? null
@@ -33,7 +33,7 @@ export default function PersonPicker({ value, onChange, exclude = [], allowNone 
         {selected ? (
           <>
             <Avatar person={selected} size="sm" />
-            <span className="flex-1 truncate">{selected.name}</span>
+            <span className="flex-1 truncate">{displayName(selected)}</span>
             <TermBadge result={termFor(selected.id)} />
           </>
         ) : (
@@ -73,7 +73,7 @@ export default function PersonPicker({ value, onChange, exclude = [], allowNone 
           >
             <Avatar person={p} size="sm" />
             <span className="min-w-0 flex-1">
-              <span className="block truncate text-sm font-medium text-ink">{p.name}</span>
+              <span className="block truncate text-sm font-medium text-ink">{displayName(p)}</span>
               <span className="block truncate text-xs text-muted">{ageLabel(p)}</span>
             </span>
             <TermBadge result={termFor(p.id)} />

@@ -2,6 +2,7 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useRef, use
 import { supabase, isConfigured } from './supabase.js'
 import { buildGraph, computeAllRelationTerms } from './kinship/index.js'
 import { bridgeRows, resolveSamePerson, findSamePersonCandidates } from './merge.js'
+import { displayName } from './format.js'
 import { useToast } from './toast.jsx'
 
 /**
@@ -482,7 +483,7 @@ export function StoreProvider({ children }) {
   const member = useMemo(() => members.find((m) => m.auth_user_id === authUser?.id) ?? null, [members, authUser])
   const peopleById = useMemo(() => new Map(people.map((p) => [p.id, p])), [people])
   const membersById = useMemo(() => new Map(members.map((m) => [m.id, m])), [members])
-  const nameOf = useCallback((pid) => peopleById.get(pid)?.name ?? '(已刪除)', [peopleById])
+  const nameOf = useCallback((pid) => (peopleById.has(pid) ? displayName(peopleById.get(pid)) : '(已刪除)'), [peopleById])
   const memberName = useCallback((mid) => membersById.get(mid)?.display_name ?? '未知成員', [membersById])
 
   const graph = useMemo(() => buildGraph({ people, parentChild, spouses }), [people, parentChild, spouses])

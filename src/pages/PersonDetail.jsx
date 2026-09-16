@@ -8,7 +8,7 @@ import PersonPicker from '../components/PersonPicker.jsx'
 import LifeEntries from '../components/LifeEntries.jsx'
 import StatsPanel from '../components/StatsPanel.jsx'
 import PetCard from '../components/PetCard.jsx'
-import { ageLabel, birthLabel, deathLabel, birthOrderLabel, GENDER_LABEL, SPOUSE_STATUS_LABEL, POLITICS_BY_ID, relativeTime } from '../lib/format.js'
+import { ageLabel, birthLabel, deathLabel, birthOrderLabel, displayName, GENDER_LABEL, SPOUSE_STATUS_LABEL, POLITICS_BY_ID, relativeTime } from '../lib/format.js'
 import { computeRelationTerm } from '../lib/kinship/index.js'
 import { compareSiblings } from '../lib/kinship/birth.js'
 
@@ -101,7 +101,8 @@ export default function PersonDetail() {
           <Avatar person={person} size="xl" ring={isViewpoint} />
           <div className="min-w-0 flex-1">
             <div className="flex flex-wrap items-center gap-1.5">
-              <h1 className="text-xl font-bold text-ink">{person.name}</h1>
+              <h1 className="text-xl font-bold text-ink">{displayName(person)}</h1>
+              {person.married_surname && <span className="rounded-full bg-surface-2 px-2 py-0.5 text-xs text-muted">本名 {person.name}</span>}
               {person.nicknames?.map((n) => (
                 <span key={n} className="rounded-full bg-surface-2 px-2 py-0.5 text-xs text-muted">
                   {n}

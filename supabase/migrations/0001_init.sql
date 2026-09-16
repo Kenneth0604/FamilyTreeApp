@@ -73,6 +73,10 @@ create table if not exists public.people (
 alter table public.people add column if not exists death_date text;
 alter table public.people drop constraint if exists people_death_date_check;
 alter table public.people add constraint people_death_date_check check (death_date is null or death_date ~ '^\d{4}(-\d{2}(-\d{2})?)?$');
+-- 冠夫姓:例如本名 陳美玲、冠夫姓 王 → 顯示「王陳美玲」;name 一律存本名
+alter table public.people add column if not exists married_surname text;
+alter table public.people drop constraint if exists people_married_surname_check;
+alter table public.people add constraint people_married_surname_check check (married_surname is null or length(married_surname) <= 10);
 -- 不確定日期時可只填大概歲數:'85'、'80-90'、'80多'(前端解析,這裡只限長度)
 alter table public.people add column if not exists death_age text;
 alter table public.people drop constraint if exists people_death_age_check;

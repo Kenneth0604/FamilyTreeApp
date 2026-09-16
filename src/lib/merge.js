@@ -43,6 +43,7 @@ export function resolveSamePerson(tree, links) {
         if (!m.birth_date && o.birth_date) m.birth_date = o.birth_date
         if (!m.death_date && o.death_date) m.death_date = o.death_date
         if (!m.death_age && o.death_age) m.death_age = o.death_age
+        if (!m.married_surname && o.married_surname) m.married_surname = o.married_surname
         if ((m.gender || 'unspecified') === 'unspecified' && o.gender && o.gender !== 'unspecified') m.gender = o.gender
         if (!m.avatar_url && o.avatar_url) m.avatar_url = o.avatar_url
         if (!m.note && o.note) m.note = o.note

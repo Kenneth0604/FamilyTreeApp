@@ -1,7 +1,7 @@
 import { Link } from 'react-router-dom'
 import Avatar from './Avatar.jsx'
 import TermBadge from './TermBadge.jsx'
-import { ageLabel, birthLabel } from '../lib/format.js'
+import { ageLabel, birthLabel, displayName } from '../lib/format.js'
 
 export default function PersonCard({ person, term, isViewpoint, isSelf }) {
   const age = ageLabel(person)
@@ -11,7 +11,7 @@ export default function PersonCard({ person, term, isViewpoint, isSelf }) {
       <Avatar person={person} size="lg" />
       <div className="min-w-0 flex-1">
         <div className="flex items-center gap-1.5">
-          <span className="truncate font-semibold text-ink">{person.name}</span>
+          <span className="truncate font-semibold text-ink">{displayName(person)}</span>
           {person.nicknames?.length > 0 && <span className="truncate text-xs text-muted">{person.nicknames.join('、')}</span>}
           {isSelf && <span className="term term-self">我</span>}
           {person.is_deceased && <span className="text-xs text-muted">†</span>}

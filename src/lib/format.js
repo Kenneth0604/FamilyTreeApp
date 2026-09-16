@@ -1,6 +1,20 @@
 import { ageFromBirth, formatBirth, parseBirth } from './kinship/birth.js'
 
 export const GENDER_LABEL = { male: '男', female: '女', unspecified: '未指定' }
+
+/** 顯示用姓名:有冠夫姓就接在本名前面(王 + 陳美玲 → 王陳美玲);name 欄位永遠是本名 */
+export function displayName(person) {
+  if (!person) return ''
+  const s = (person.married_surname || '').trim()
+  return s ? `${s}${person.name}` : person.name || ''
+}
+/** 配偶的姓(中文名取第一個字;拉丁字母名取第一個字組):給「冠夫姓」欄位當建議 */
+export function surnameOf(name) {
+  const n = String(name || '').trim()
+  if (!n) return ''
+  if (/^[A-Za-z]/.test(n)) return n.split(/\s+/).pop()
+  return Array.from(n)[0]
+}
 /** 配偶 / 伴侶關係狀態(顯示順序即此順序) */
 export const SPOUSE_STATUS_LABEL = { married: '已婚', partner: '伴侶(未婚)', divorced: '離婚', ex_partner: '前伴侶', widowed: '喪偶' }
 
