@@ -242,14 +242,14 @@ export function layoutTree(graph, terms, viewpointId) {
 // =====================================================================================
 // 放射排版:視角本人在圓心,依「親等」一圈圈往外
 // =====================================================================================
-export const RING_MIN = NODE_H + 110
+export const RING_GAP = NODE_H + 40 // 相鄰兩圈的最小半徑差:卡片高度 + 一點空隙(方向不同時另外依卡片厚度再撐)
 
 /**
  * 1. 現任配偶黏成單位(同分層排版),視角的單位放圓心
  * 2. 從圓心對單位做 BFS:走親子邊(與已結束的配偶邊),深度 = 第幾圈,BFS 樹決定每個單位掛在誰底下
- * 3. 角度:標準放射樹 —— 每個單位分到一段扇形,依子樹的葉子數比例分給底下的單位,自己放在扇形中央;
+ * 3. 角度:每個單位分到一段扇形,依「需要的角度」比例分給底下的單位,自己放在扇形中央;
  *    圓心的長輩那一側分上半圓、後代分下半圓(只有一邊時佈滿整圈)
- * 4. 半徑:每圈的間距取「所有單位在自己那圈的弧長都放得下卡片」的最小值,所以不會重疊
+ * 4. 半徑:每圈各自取「剛好放得下、不重疊」的最小半徑(角度與半徑交替逼近幾輪)
  * 走不到的人(其他連通分量)排在最下面一排
  *
  * @returns {{ positions: Map<string,{x:number,y:number}>, rows: Map, unlinked: string[], ring: number, center: {x:number,y:number} }}
@@ -320,12 +320,24 @@ export function layoutRadial(graph, viewpointId) {
     u.leaves = u.children.length ? u.children.reduce((s, c) => s + c.leaves, 0) : 1
   }
 
-  // ---- 3. 角度 ----
+  // ---- 3 + 4. 角度與半徑交替逼近:半徑只要剛好放得下、不重疊就好 ----
+  // 每一圈有自己的半徑(不是等距):第 d 圈至少比第 d-1 圈多 RING_GAP,再依「這圈每個單位分到的弧長要放得下卡片」往外撐。
+  // 扇形不是照葉子數分,而是照「需要的角度」分(自己在自己那圈的切向寬度 / 半徑,與底下所有單位需要的角度總和取大者),
+  // 所以一個人的分支不會佔一大片、多人的分支也不會被擠到重疊。
+  const maxDepth = order.reduce((m, u) => Math.max(m, u.depth), 0)
+  const radii = [0]
+  for (let d = 1; d <= maxDepth; d++) radii[d] = radii[d - 1] + RING_GAP
+  /** 卡片(軸對齊的長方形)在角度 angle 處沿圓周方向的寬度 + 間距 */
+  const tangent = (u, angle) => Math.abs(u.w * Math.sin(angle)) + Math.abs(NODE_H * Math.cos(angle)) + 28
+  /** 沿半徑方向的厚度 */
+  const radial = (u, angle) => Math.abs(u.w * Math.cos(angle)) + Math.abs(NODE_H * Math.sin(angle))
+  const ups = root.children.filter((c) => c.dir === 'up')
+  const downs = root.children.filter((c) => c.dir !== 'up')
   const spread = (group, a0, a1) => {
-    const total = group.reduce((s, c) => s + c.leaves, 0)
+    const total = group.reduce((s, c) => s + c.need, 0) || 1
     let a = a0
     for (const c of group) {
-      const span = ((a1 - a0) * c.leaves) / total
+      const span = ((a1 - a0) * c.need) / total
       assign(c, a, a + span)
       a += span
     }
@@ -336,22 +348,73 @@ export function layoutRadial(graph, viewpointId) {
     u.angle = (a0 + a1) / 2
     if (u.children.length) spread(u.children, a0, a1)
   }
-  const ups = root.children.filter((c) => c.dir === 'up')
-  const downs = root.children.filter((c) => c.dir !== 'up')
-  // 螢幕座標 y 向下:角度 -π..0 在上半圓、0..π 在下半圓
-  if (ups.length && downs.length) {
-    spread(ups, -Math.PI, 0)
-    spread(downs, 0, Math.PI)
-  } else if (ups.length) spread(ups, -Math.PI * 1.5, Math.PI * 0.5)
-  else if (downs.length) spread(downs, -Math.PI * 0.5, Math.PI * 1.5)
-
-  // ---- 4. 半徑:每個單位在自己那圈分到的弧長要放得下 ----
-  let ring = RING_MIN
-  for (const u of order) {
-    if (u.depth === 0) continue
-    const size = Math.max(u.w, NODE_H) + 36
-    const span = u.a1 - u.a0
-    if (span > 0) ring = Math.max(ring, size / (u.depth * span))
+  const assignAll = () => {
+    // 螢幕座標 y 向下:角度 -π..0 在上半圓、0..π 在下半圓;只有一邊時佈滿整圈
+    if (ups.length && downs.length) {
+      spread(ups, -Math.PI, 0)
+      spread(downs, 0, Math.PI)
+    } else if (ups.length) spread(ups, -Math.PI * 1.5, Math.PI * 0.5)
+    else if (downs.length) spread(downs, -Math.PI * 0.5, Math.PI * 1.5)
+  }
+  for (const u of order) u.need = u.leaves // 第一輪先照葉子數
+  assignAll()
+  for (let iter = 0; iter < 10; iter++) {
+    // 需要的角度(由外往內累加)
+    for (let i = order.length - 1; i >= 0; i--) {
+      const u = order[i]
+      const own = u.depth ? tangent(u, u.angle) / radii[u.depth] : 0
+      const kids = u.children.reduce((s, c) => s + c.need, 0)
+      u.need = Math.max(own, kids)
+    }
+    assignAll()
+    // 這一圈放不下 → 半徑往外撐;外圈至少要比內圈多 RING_GAP
+    let changed = false
+    for (const u of order) {
+      if (!u.depth) continue
+      const span = u.a1 - u.a0
+      const req = span > 0 ? tangent(u, u.angle) / span : 0
+      if (radii[u.depth] < req - 0.5) {
+        radii[u.depth] = req
+        changed = true
+      }
+    }
+    // 跟內圈的父母單位在差不多的方向:兩張卡沿半徑方向的厚度加起來也要放得下(左右方向的夫妻卡是「寬」邊朝著圓心)
+    for (const u of order) {
+      if (!u.depth) continue
+      const p = u.parent
+      const need = radii[p.depth] + (radial(u, u.angle) + radial(p, p.angle)) / 2 + 24
+      if (radii[u.depth] < need - 0.5) {
+        radii[u.depth] = need
+        changed = true
+      }
+    }
+    for (let d = 1; d <= maxDepth; d++) {
+      if (radii[d] < radii[d - 1] + RING_GAP) {
+        radii[d] = radii[d - 1] + RING_GAP
+        changed = true
+      }
+    }
+    if (!changed) break
+  }
+  // 最後保險:逐對檢查卡片矩形,還有重疊的就把外圈往外推一點,直到沒有(角度規則管不到斜對角的情況)
+  const rectOf = (u) => ({ x: radii[u.depth] * Math.cos(u.angle) - u.w / 2, y: radii[u.depth] * Math.sin(u.angle) - NODE_H / 2, w: u.w, h: NODE_H })
+  for (let iter = 0; iter < 60; iter++) {
+    const bumped = new Set()
+    for (let i = 0; i < order.length; i++) {
+      for (let j = i + 1; j < order.length; j++) {
+        const a = order[i]
+        const b = order[j]
+        const outer = a.depth >= b.depth ? a : b
+        if (!outer.depth || bumped.has(outer.depth)) continue
+        const ra = rectOf(a)
+        const rb = rectOf(b)
+        const M = 12
+        if (ra.x < rb.x + rb.w + M && rb.x < ra.x + ra.w + M && ra.y < rb.y + rb.h + M && rb.y < ra.y + ra.h + M) bumped.add(outer.depth)
+      }
+    }
+    if (!bumped.size) break
+    for (const d of bumped) radii[d] += 20
+    for (let d = 1; d <= maxDepth; d++) radii[d] = Math.max(radii[d], radii[d - 1] + RING_GAP)
   }
 
   // ---- 輸出 ----
@@ -363,18 +426,14 @@ export function layoutRadial(graph, viewpointId) {
       x += NODE_W + COUPLE_GAP
     }
   }
-  let maxDepth = 0
-  for (const u of order) {
-    maxDepth = Math.max(maxDepth, u.depth)
-    placeUnit(u, u.depth * ring * Math.cos(u.angle), u.depth * ring * Math.sin(u.angle))
-  }
+  for (const u of order) placeUnit(u, radii[u.depth] * Math.cos(u.angle), radii[u.depth] * Math.sin(u.angle))
   // 走不到的人:最下面一排
   const unreached = units.filter((u) => u.depth < 0)
   const unlinked = unreached.flatMap((u) => u.members)
   if (unreached.length) {
     const totalW = unreached.reduce((s, u) => s + u.w + GAP_X, -GAP_X)
     let x = -totalW / 2
-    const y = (maxDepth + 1) * ring + NODE_H
+    const y = (radii[maxDepth] || 0) + RING_GAP + NODE_H
     for (const u of unreached) {
       placeUnit(u, x + u.w / 2, y)
       x += u.w + GAP_X
@@ -386,7 +445,7 @@ export function layoutRadial(graph, viewpointId) {
     p.x -= minX
     p.y -= minY
   }
-  return { positions, rows: new Map(), unlinked, ring, center: { x: -minX, y: -minY } }
+  return { positions, rows: new Map(), unlinked, ring: radii[1] ?? 0, radii, center: { x: -minX, y: -minY } }
 }
 
 /** 從 id 出發,沿 next(id) 給的鄰居收集成一個單位(配偶鏈:A–B–C 都黏在一起) */

@@ -51,9 +51,10 @@ const PersonNode = memo(function PersonNode({ data }) {
  */
 const JUNCTION_SIZE = 8
 const centerHandle = { top: '50%', bottom: 'auto', left: '50%', transform: 'translate(-50%, -50%)', width: 1, height: 1, minWidth: 0, minHeight: 0, opacity: 0 }
-const JunctionNode = memo(function JunctionNode() {
+const JunctionNode = memo(function JunctionNode({ data }) {
+  const size = data?.thin ? JUNCTION_SIZE * 0.7 : JUNCTION_SIZE
   return (
-    <div className="rounded-full" style={{ width: JUNCTION_SIZE, height: JUNCTION_SIZE, background: 'var(--t-vessel)' }}>
+    <div className="rounded-full" style={{ width: size, height: size, margin: (JUNCTION_SIZE - size) / 2, background: 'var(--t-vessel)' }}>
       <Handle type="target" position={Position.Top} id="top" style={centerHandle} />
       <Handle type="source" position={Position.Bottom} id="bottom" style={centerHandle} />
     </div>
@@ -239,7 +240,33 @@ function TreeCanvas() {
       const childTop = Math.min(...childPos.map((p) => p.y))
       // 孩子被搬到父母上方時,連接點仍放在父母下方一點,線才不會反折
       const y = childTop > parentBottom ? parentBottom + (childTop - parentBottom) / 2 : parentBottom + 24
-      out.set(key, { id: `junction-${key}`, x: px, y, parentIds: g.parentIds, childIds: g.childIds })
+      const xs = [...parentPos, ...childPos].map((p) => p.x + NODE_W / 2)
+      out.set(key, { id: `junction-${key}`, x: px, y, parentIds: g.parentIds, childIds: g.childIds, zone: Math.round(parentBottom), gap: Math.max(0, childTop - parentBottom), minX: Math.min(...xs), maxX: Math.max(...xs), thin: false })
+    }
+    // 同一段列間空隙裡,橫桿(父母 → 連接點 → 孩子的水平段)會左右延伸;範圍重疊的家庭全疊在同一個高度會看不懂。
+    // 依範圍做區間著色分「車道」:重疊的錯開不同高度,並把血管畫細一點
+    const zones = new Map()
+    for (const j of out.values()) {
+      if (!zones.has(j.zone)) zones.set(j.zone, [])
+      zones.get(j.zone).push(j)
+    }
+    for (const list of zones.values()) {
+      list.sort((a, b) => a.minX - b.minX || a.maxX - b.maxX)
+      const lanes = [] // 每條車道目前延伸到的最右邊
+      for (const j of list) {
+        j.overlaps = list.some((o) => o !== j && o.minX < j.maxX + 6 && j.minX < o.maxX + 6)
+        let lane = lanes.findIndex((right) => right + 6 < j.minX)
+        if (lane < 0) lane = lanes.push(-Infinity) - 1
+        lanes[lane] = j.maxX
+        j.lane = lane
+      }
+      if (lanes.length <= 1) continue
+      const gap = Math.min(...list.map((j) => j.gap)) || 90
+      const step = Math.min(16, (gap - 36) / (lanes.length - 1))
+      for (const j of list) {
+        j.y += (j.lane - (lanes.length - 1) / 2) * step
+        j.thin = j.overlaps
+      }
     }
     return out
   }, [radial, parentChild, positions])
@@ -380,7 +407,7 @@ function TreeCanvas() {
         id: j.id,
         type: 'junction',
         position: { x: j.x - JUNCTION_SIZE / 2, y: j.y - JUNCTION_SIZE / 2 },
-        data: {},
+        data: { thin: j.thin },
         draggable: false,
         selectable: false,
       })),
@@ -415,8 +442,9 @@ function TreeCanvas() {
       return out
     }
     for (const j of junctions.values()) {
-      for (const pid of j.parentIds) out.push({ id: `pc-in-${j.id}-${pid}`, source: pid, target: j.id, sourceHandle: 'bottom', targetHandle: 'top', type: 'vessel', data: { kind: 'parent' } })
-      for (const cid of j.childIds) out.push({ id: `pc-out-${j.id}-${cid}`, source: j.id, target: cid, sourceHandle: 'bottom', targetHandle: 'top', type: 'vessel', data: { kind: 'child' } })
+      const scale = j.thin ? 0.6 : 1 // 橫桿跟別家重疊錯開時畫細一點,才分得出哪條是哪家的
+      for (const pid of j.parentIds) out.push({ id: `pc-in-${j.id}-${pid}`, source: pid, target: j.id, sourceHandle: 'bottom', targetHandle: 'top', type: 'vessel', data: { kind: 'parent', scale } })
+      for (const cid of j.childIds) out.push({ id: `pc-out-${j.id}-${cid}`, source: j.id, target: cid, sourceHandle: 'bottom', targetHandle: 'top', type: 'vessel', data: { kind: 'child', scale } })
     }
     for (const s of spouses) {
       if (!peopleById.has(s.person_a_id) || !peopleById.has(s.person_b_id)) continue

@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest'
 import { buildGraph, computeAllRelationTerms } from './kinship/index.js'
-import { layoutTree, layoutRadial, NODE_W, NODE_H } from './treeLayout.js'
+import { layoutTree, layoutRadial, NODE_W, NODE_H, RING_GAP } from './treeLayout.js'
 import { initial } from './format.js'
 
 function family() {
@@ -156,7 +156,7 @@ describe('treeLayout:合併樹資料不一致時配偶仍同一層', () => {
 
 describe('layoutRadial', () => {
   const { graph, ids } = family()
-  const { positions, unlinked, ring } = layoutRadial(graph, ids.me)
+  const { positions, unlinked, ring, radii } = layoutRadial(graph, ids.me)
   const center = (id) => ({ x: positions.get(id).x + NODE_W / 2, y: positions.get(id).y + NODE_H / 2 })
   const dist = (a, b) => Math.hypot(center(a).x - center(b).x, center(a).y - center(b).y)
 
@@ -176,7 +176,11 @@ describe('layoutRadial', () => {
     expect(r(ids.dad)).toBeLessThan(r(ids.gp))
     expect(r(ids.gp)).toBeLessThan(r(ids.unc) + 1) // 叔叔掛在爺爺底下,比爺爺再外一圈
     expect(r(ids.unc)).toBeLessThan(r(ids.cousin))
-    expect(ring).toBeGreaterThanOrEqual(NODE_H + 110)
+    expect(ring).toBeGreaterThanOrEqual(RING_GAP)
+    for (let d = 1; d < radii.length; d++) expect(radii[d] - radii[d - 1]).toBeGreaterThanOrEqual(RING_GAP - 0.01)
+  })
+  it('半徑剛好就好:小家族每圈頂多比最小間距多一張卡的寬度', () => {
+    for (let d = 1; d < radii.length; d++) expect(radii[d] - radii[d - 1]).toBeLessThan(RING_GAP + NODE_W * 1.5)
   })
   it('卡片不重疊', () => {
     const list = [...positions.entries()]
