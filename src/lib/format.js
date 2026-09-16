@@ -139,7 +139,7 @@ export const parseNicknames = parseList
  */
 export const STATS = [
   { id: 'fun', label: '有趣', icon: '🎉', low: '無聊到睡著', high: '全場焦點' },
-  { id: 'crazy', label: '有病', icon: '🤪', low: '正常人', high: '病入膏肓', negative: true },
+  { id: 'crazy', label: '有病', icon: '🤒', low: '正常人', high: '病入膏肓', negative: true },
   { id: 'temper', label: '脾氣', icon: '🌋', low: '一秒爆炸', high: '佛系' },
   { id: 'smart', label: '聰明', icon: '🧠', low: '傻人有傻福', high: '人形電腦' },
   { id: 'education', label: '學歷', icon: '🎓', low: '社會大學', high: '博士後' },

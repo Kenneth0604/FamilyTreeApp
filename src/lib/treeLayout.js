@@ -43,6 +43,23 @@ export function layoutTree(graph, terms, viewpointId) {
   }
   if (unlinked.length) assignComponentGenerations(graph, gen, unlinked)
 
+  // 現任配偶一定要同一層才能黏成單位。資料不一致(常見於合併樹:兩邊各自記的關係繞成一圈)時
+  // 兩人可能被算到不同世代 —— 讓「樹上沒有父母」的那一方(嫁 / 娶進來的)跟著對方走
+  const activeSpouses = (id) => (graph.spousesOf.get(id) || []).filter((s) => isActiveSpouse(s.status)).map((s) => s.id)
+  const hasParents = (id) => (graph.parentsOf.get(id) || []).length > 0
+  for (let pass = 0, changed = true; changed && pass < 5; pass++) {
+    changed = false
+    for (const id of ids) {
+      for (const s of activeSpouses(id)) {
+        if (gen.get(s) === gen.get(id)) continue
+        if (!hasParents(s) && hasParents(id)) gen.set(s, gen.get(id))
+        else if (!hasParents(id) && hasParents(s)) gen.set(id, gen.get(s))
+        else continue
+        changed = true
+      }
+    }
+  }
+
   const rowsMap = new Map()
   for (const [id, g] of gen) {
     if (!rowsMap.has(g)) rowsMap.set(g, [])
@@ -52,7 +69,6 @@ export function layoutTree(graph, terms, viewpointId) {
   const rowIndex = new Map(rowKeys.map((g, i) => [g, i]))
 
   // ---- 2. 成組:同層的現任配偶黏成單位 ----
-  const activeSpouses = (id) => (graph.spousesOf.get(id) || []).filter((s) => isActiveSpouse(s.status)).map((s) => s.id)
   const unitOf = new Map() // person id → unit
   const layers = rowKeys.map(() => []) // rowIndex → unit[]
   for (const g of rowKeys) {
@@ -221,6 +237,156 @@ export function layoutTree(graph, terms, viewpointId) {
   for (const p of positions.values()) p.x -= minX
 
   return { positions, rows: rowsMap, unlinked }
+}
+
+// =====================================================================================
+// 放射排版:視角本人在圓心,依「親等」一圈圈往外
+// =====================================================================================
+export const RING_MIN = NODE_H + 110
+
+/**
+ * 1. 現任配偶黏成單位(同分層排版),視角的單位放圓心
+ * 2. 從圓心對單位做 BFS:走親子邊(與已結束的配偶邊),深度 = 第幾圈,BFS 樹決定每個單位掛在誰底下
+ * 3. 角度:標準放射樹 —— 每個單位分到一段扇形,依子樹的葉子數比例分給底下的單位,自己放在扇形中央;
+ *    圓心的長輩那一側分上半圓、後代分下半圓(只有一邊時佈滿整圈)
+ * 4. 半徑:每圈的間距取「所有單位在自己那圈的弧長都放得下卡片」的最小值,所以不會重疊
+ * 走不到的人(其他連通分量)排在最下面一排
+ *
+ * @returns {{ positions: Map<string,{x:number,y:number}>, rows: Map, unlinked: string[], ring: number, center: {x:number,y:number} }}
+ */
+export function layoutRadial(graph, viewpointId) {
+  const ids = [...graph.persons.keys()]
+  if (ids.length === 0) return { positions: new Map(), rows: new Map(), unlinked: [], ring: 0, center: { x: 0, y: 0 } }
+  const activeSpouses = (id) => (graph.spousesOf.get(id) || []).filter((s) => isActiveSpouse(s.status)).map((s) => s.id)
+
+  // ---- 1. 成組 ----
+  const unitOf = new Map()
+  const units = []
+  for (const id of ids) {
+    if (unitOf.has(id)) continue
+    const members = orderMembers(collectUnit(id, activeSpouses), graph)
+    const u = { members, w: members.length * NODE_W + (members.length - 1) * COUPLE_GAP, kin: new Map(), side: new Set(), depth: -1, dir: null, parent: null, children: [], leaves: 1, a0: 0, a1: 0, angle: 0 }
+    for (const m of members) unitOf.set(m, u)
+    units.push(u)
+  }
+  for (const u of units) {
+    for (const m of u.members) {
+      for (const p of graph.parentsOf.get(m) || []) {
+        const pu = unitOf.get(p)
+        if (pu && pu !== u) u.kin.set(pu, 'up')
+      }
+      for (const c of graph.childrenOf.get(m) || []) {
+        const cu = unitOf.get(c)
+        if (cu && cu !== u && !u.kin.has(cu)) u.kin.set(cu, 'down')
+      }
+      for (const s of graph.spousesOf.get(m) || []) {
+        const su = unitOf.get(s.id)
+        if (su && su !== u) u.side.add(su)
+      }
+    }
+  }
+
+  // ---- 2. BFS 樹 ----
+  const root = unitOf.get(graph.persons.has(viewpointId) ? viewpointId : ids[0])
+  root.depth = 0
+  const order = []
+  const queue = [root]
+  while (queue.length) {
+    const u = queue.shift()
+    order.push(u)
+    const next = [...u.kin.entries(), ...[...u.side].map((s) => [s, 'side'])]
+    for (const [n, dir] of next) {
+      if (n.depth >= 0) continue
+      n.depth = u.depth + 1
+      n.parent = u
+      n.dir = dir
+      u.children.push(n)
+      queue.push(n)
+    }
+  }
+  // 同一個單位底下的順序:長輩 → 前任 → 後代;同類依長幼(跟這個單位有親子關係的那個成員的生日 / 排行)
+  const DIR_RANK = { up: 0, side: 1, down: 2 }
+  const connected = (child, u) => {
+    for (const m of child.members) {
+      const ps = graph.parentsOf.get(m) || []
+      const cs = graph.childrenOf.get(m) || []
+      if (ps.some((p) => u.members.includes(p)) || cs.some((c) => u.members.includes(c))) return graph.persons.get(m)
+    }
+    return graph.persons.get(child.members[0])
+  }
+  for (const u of order) u.children.sort((a, b) => DIR_RANK[a.dir] - DIR_RANK[b.dir] || -compareSiblings(connected(a, u), connected(b, u)) || String(a.members[0]).localeCompare(String(b.members[0])))
+  for (let i = order.length - 1; i >= 0; i--) {
+    const u = order[i]
+    u.leaves = u.children.length ? u.children.reduce((s, c) => s + c.leaves, 0) : 1
+  }
+
+  // ---- 3. 角度 ----
+  const spread = (group, a0, a1) => {
+    const total = group.reduce((s, c) => s + c.leaves, 0)
+    let a = a0
+    for (const c of group) {
+      const span = ((a1 - a0) * c.leaves) / total
+      assign(c, a, a + span)
+      a += span
+    }
+  }
+  const assign = (u, a0, a1) => {
+    u.a0 = a0
+    u.a1 = a1
+    u.angle = (a0 + a1) / 2
+    if (u.children.length) spread(u.children, a0, a1)
+  }
+  const ups = root.children.filter((c) => c.dir === 'up')
+  const downs = root.children.filter((c) => c.dir !== 'up')
+  // 螢幕座標 y 向下:角度 -π..0 在上半圓、0..π 在下半圓
+  if (ups.length && downs.length) {
+    spread(ups, -Math.PI, 0)
+    spread(downs, 0, Math.PI)
+  } else if (ups.length) spread(ups, -Math.PI * 1.5, Math.PI * 0.5)
+  else if (downs.length) spread(downs, -Math.PI * 0.5, Math.PI * 1.5)
+
+  // ---- 4. 半徑:每個單位在自己那圈分到的弧長要放得下 ----
+  let ring = RING_MIN
+  for (const u of order) {
+    if (u.depth === 0) continue
+    const size = Math.max(u.w, NODE_H) + 36
+    const span = u.a1 - u.a0
+    if (span > 0) ring = Math.max(ring, size / (u.depth * span))
+  }
+
+  // ---- 輸出 ----
+  const positions = new Map()
+  const placeUnit = (u, cx, cy) => {
+    let x = cx - u.w / 2
+    for (const m of u.members) {
+      positions.set(m, { x, y: cy - NODE_H / 2 })
+      x += NODE_W + COUPLE_GAP
+    }
+  }
+  let maxDepth = 0
+  for (const u of order) {
+    maxDepth = Math.max(maxDepth, u.depth)
+    placeUnit(u, u.depth * ring * Math.cos(u.angle), u.depth * ring * Math.sin(u.angle))
+  }
+  // 走不到的人:最下面一排
+  const unreached = units.filter((u) => u.depth < 0)
+  const unlinked = unreached.flatMap((u) => u.members)
+  if (unreached.length) {
+    const totalW = unreached.reduce((s, u) => s + u.w + GAP_X, -GAP_X)
+    let x = -totalW / 2
+    const y = (maxDepth + 1) * ring + NODE_H
+    for (const u of unreached) {
+      placeUnit(u, x + u.w / 2, y)
+      x += u.w + GAP_X
+    }
+  }
+  const minX = Math.min(...[...positions.values()].map((p) => p.x))
+  const minY = Math.min(...[...positions.values()].map((p) => p.y))
+  for (const p of positions.values()) {
+    p.x -= minX
+    p.y -= minY
+  }
+  return { positions, rows: new Map(), unlinked, ring, center: { x: -minX, y: -minY } }
 }
 
 /** 從 id 出發,沿 next(id) 給的鄰居收集成一個單位(配偶鏈:A–B–C 都黏在一起) */

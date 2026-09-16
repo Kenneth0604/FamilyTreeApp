@@ -101,6 +101,15 @@ function lookup(code, P, opts) {
       return elderTerm(T, V, siblingNames())
     case 'US':
       return byGender(T, '繼父', '繼母', '父母的配偶')
+    case 'UUS': {
+      // 祖父母的配偶,但沒登記為父母的父母(常見:只把奶奶加成爺爺的太太)→ 仍叫奶奶 / 外婆,附提示請補親子關係
+      const gp = G(P[1])
+      const base = gp === 'm' ? byGender(T, '爺爺', '奶奶', '祖父母') : gp === 'f' ? byGender(T, '外公', '外婆', '外祖父母') : byGender(T, '祖父', '祖母', '祖父母')
+      const who = P[2]?.name ?? '祖父母'
+      const par = P[1]?.name ?? '父母'
+      const role = G(T) === 'f' ? '媽媽' : G(T) === 'm' ? '爸爸' : '父母'
+      return { ...base, kind: 'approx', hint: `只登記為「${who}」的配偶;若也是「${par}」的${role},請到「${par}」的頁面補上父母關係` }
+    }
     case 'SD':
       return byGender(T, '繼子', '繼女', '配偶的孩子')
     case 'SU': {

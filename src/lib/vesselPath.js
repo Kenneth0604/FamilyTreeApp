@@ -154,6 +154,12 @@ export const widthChild = (t, s, L) => {
   const r = L - s
   return r < F ? VESSEL.min + (VESSEL.max - VESSEL.min) * easeInCubic(1 - r / F) : VESSEL.min
 }
+/** 父母 → 孩子直連(放射排版沒有連接點):兩端寬、中段細管 */
+export const widthDirect = (t, s, L) => {
+  const F = funnelLen(L)
+  const r = Math.min(s, L - s)
+  return r < F ? VESSEL.min + (VESSEL.max - VESSEL.min) * easeInCubic(1 - r / F) : VESSEL.min
+}
 /** 配偶:兩端 9、中間 4 的小血管;scale 可整體縮小(伴侶 / 前伴侶) */
 export const widthSpouse =
   (scale = 1) =>

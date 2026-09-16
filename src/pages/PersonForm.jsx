@@ -49,6 +49,7 @@ export default function PersonForm() {
   const [anchorId, setAnchorId] = useState(params.get('of') || viewpointId || people[0]?.id || null)
   const [spouseStatus, setSpouseStatus] = useState('married')
   const [coParentIds, setCoParentIds] = useState([]) // 新增子女時,同時設為配偶的孩子
+  const [coChildIds, setCoChildIds] = useState([]) // 新增配偶時,同時設為對方孩子的家長(否則「爺爺的太太」不會變成奶奶)
   const [placeholderGender, setPlaceholderGender] = useState('male')
   const [makeSelf, setMakeSelf] = useState(false)
 
@@ -90,6 +91,11 @@ export default function PersonForm() {
     // 新增子女時預設把現任配偶也設為另一位家長
     setCoParentIds(relType === 'child' ? anchorSpouses : [])
   }, [relType, anchorSpouses])
+  // 對方的孩子:新增配偶時,預設把「還缺一位家長」的孩子也掛給新配偶(已有兩位家長的不勾,避免變成繼父母)
+  const anchorChildren = useMemo(() => (anchorId ? graph.childrenOf.get(anchorId) || [] : []), [graph, anchorId])
+  useEffect(() => {
+    setCoChildIds(relType === 'spouse' && isActiveSpouse(spouseStatus) ? anchorChildren.filter((c) => (graph.parentsOf.get(c) || []).length < 2) : [])
+  }, [relType, spouseStatus, anchorChildren, graph])
 
   const needsPlaceholder = isNew && relType === 'sibling' && anchorId && anchorParents.length === 0
   const hasRelation = isNew && people.length > 0
@@ -139,6 +145,7 @@ export default function PersonForm() {
           for (const pid of coParentIds) await addParentChild(pid, newId)
         } else if (relType === 'spouse') {
           await addSpouse(anchorId, newId, spouseStatus)
+          for (const cid of coChildIds) await addParentChild(newId, cid)
         } else if (relType === 'sibling') {
           let parents = anchorParents
           if (parents.length === 0) {
@@ -210,6 +217,30 @@ export default function PersonForm() {
                 ))}
               </div>
               <p className="mt-1 text-xs text-muted">離婚 / 前伴侶在樹狀圖上會用不同線型標示,也可以有共同的孩子。</p>
+            </div>
+          )}
+
+          {relType === 'spouse' && anchorChildren.length > 0 && (
+            <div>
+              <label className="label">也是這些孩子的家長</label>
+              <div className="space-y-1.5">
+                {anchorChildren.map((cid) => {
+                  const ch = peopleById.get(cid)
+                  const on = coChildIds.includes(cid)
+                  const full = (graph.parentsOf.get(cid) || []).length >= 2
+                  return (
+                    <label key={cid} className="flex items-center gap-2 text-sm text-ink">
+                      <input type="checkbox" checked={on} onChange={(e) => setCoChildIds((l) => (e.target.checked ? [...l, cid] : l.filter((x) => x !== cid)))} className="h-4 w-4 accent-primary" />
+                      <Avatar person={ch} size="sm" />
+                      <span className="flex-1">
+                        同時設為 {ch?.name} 的家長
+                        {full && <span className="ml-1 text-xs text-muted">(已有兩位家長)</span>}
+                      </span>
+                    </label>
+                  )
+                })}
+              </div>
+              <p className="mt-1 text-xs text-muted">勾了才會有血緣關係:例如新增爺爺的太太時勾上爸爸,她才會被算成「奶奶」;不勾就是「爺爺的太太」。</p>
             </div>
           )}
 

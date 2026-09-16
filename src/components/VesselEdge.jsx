@@ -1,18 +1,20 @@
 import { useMemo } from 'react'
 import { EdgeLabelRenderer } from '@xyflow/react'
-import { buildVesselPath, routePoints, widthParent, widthChild, widthSpouse } from '../lib/vesselPath.js'
+import { buildVesselPath, routePoints, widthParent, widthChild, widthDirect, widthSpouse } from '../lib/vesselPath.js'
 
 const ENDED = new Set(['divorced', 'ex_partner'])
 
 function widthFor(kind, status) {
   if (kind === 'parent') return widthParent
   if (kind === 'child') return widthChild
+  if (kind === 'direct') return widthDirect
   return widthSpouse(status === 'partner' || status === 'ex_partner' ? 0.8 : 1)
 }
 
 /**
  * 血管造型的 React Flow edge(取代 BusEdge 與內建的 straight / step)
- * data: { kind: 'parent' | 'child' | 'spouse', status?: 配偶狀態, route?: 'target' | 'source' | 'step' | 'straight', label?: string }
+ * data: { kind: 'parent' | 'child' | 'direct' | 'spouse', status?: 配偶狀態, route?: 'target' | 'source' | 'step' | 'straight', label?: string,
+ *         points?: { sx, sy, tx, ty } 明確指定兩端座標(放射排版:從卡片邊緣出發,不用 handle 的位置) }
  *
  * 層次:
  * - vessel-body   封閉形狀填色(不透明,重疊的細管看起來是同一條)
@@ -23,11 +25,15 @@ function widthFor(kind, status) {
  * - vessel-outline 已結束的關係(離婚 / 前伴侶)加一條虛線外框,像乾掉的空管
  * 配偶沒有血緣,不流動。
  */
-export default function VesselEdge({ id, sourceX, sourceY, targetX, targetY, data = {}, style }) {
+export default function VesselEdge({ id, sourceX: hx, sourceY: hy, targetX: hxt, targetY: hyt, data = {}, style }) {
   const kind = data.kind ?? 'child'
   const status = data.status
   const route = data.route ?? (kind === 'parent' ? 'target' : kind === 'child' ? 'source' : 'straight')
   const ended = ENDED.has(status)
+  const sourceX = data.points?.sx ?? hx
+  const sourceY = data.points?.sy ?? hy
+  const targetX = data.points?.tx ?? hxt
+  const targetY = data.points?.ty ?? hyt
   const geo = useMemo(() => {
     const pts = routePoints(sourceX, sourceY, targetX, targetY, route)
     const widthFn = widthFor(kind, status)

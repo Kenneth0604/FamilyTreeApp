@@ -339,6 +339,27 @@ describe('配偶雙方的姻親', () => {
     expect(g.term(v, spDad)).toBe('配偶的爸爸')
     expect(g.result(v, spBro)).toMatchObject({ term: '配偶的兄弟', kind: 'approx' })
   })
+  it('爺爺的太太沒登記為爸爸的媽媽 → 仍叫奶奶(approx,附提示);外公那邊 → 外婆', () => {
+    const g = fixture()
+    const me = g.person('我', 'male', '1990')
+    const dad = g.person('爸', 'male', '1965')
+    const mom = g.person('媽', 'female', '1967')
+    g.parents(dad, mom, me)
+    const gp = g.person('爺爺', 'male', '1940')
+    g.parent(gp, dad)
+    const gm = g.person('奶奶', 'female', '1942')
+    g.marry(gp, gm) // 只當爺爺的配偶
+    expect(g.result(me, gm)).toMatchObject({ term: '奶奶', kind: 'approx' })
+    expect(g.result(me, gm).hint).toContain('補上父母關係')
+    const mgm = g.person('外婆', 'female', '1945')
+    g.parent(mgm, mom)
+    const mgp = g.person('外公', 'male', '1943')
+    g.marry(mgm, mgp)
+    expect(g.result(me, mgp)).toMatchObject({ term: '外公', kind: 'approx' })
+    // 有登記親子關係就是正常的 exact
+    g.parent(gm, dad)
+    expect(g.result(me, gm)).toMatchObject({ term: '奶奶', kind: 'exact' })
+  })
   it('繼父母 / 繼子女', () => {
     const g = fixture()
     const me = g.person('我', 'female', '2000')

@@ -2,7 +2,7 @@ import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { ReactFlow, Background, Controls, Handle, Position, useReactFlow, ReactFlowProvider } from '@xyflow/react'
 import { useStore } from '../lib/store.jsx'
-import { layoutTree, NODE_W, NODE_H } from '../lib/treeLayout.js'
+import { layoutTree, layoutRadial, NODE_W, NODE_H } from '../lib/treeLayout.js'
 import Avatar from '../components/Avatar.jsx'
 import TermBadge from '../components/TermBadge.jsx'
 import VesselEdge from '../components/VesselEdge.jsx'
@@ -97,23 +97,55 @@ function readView(fid) {
 /** 配偶 / 伴侶連線上的文字;樣式(顏色、是否乾枯)由 VesselEdge 依 status 決定 */
 const SPOUSE_LABEL = { partner: '伴侶', divorced: '離婚', ex_partner: '前伴侶' }
 
-/** 手動搬過的卡片位置,存在這台裝置(每個家族一份) */
-const layoutKey = (fid) => `familytree:layout:${fid}`
-function readOverrides(fid) {
+/** 排版方式(分層 / 放射),存在這台裝置 */
+const ARRANGEMENTS = [
+  { id: 'layered', label: '分層', icon: '☰', hint: '依世代一層層排,配偶並排、孩子在父母下方' },
+  { id: 'radial', label: '放射', icon: '☀', hint: '視角本人在圓心,依親等一圈圈往外;長輩在上半圓、後代在下半圓' },
+]
+const arrangeKey = (fid) => `familytree:arrange:${fid}`
+function readArrangement(fid) {
   try {
-    const v = localStorage.getItem(layoutKey(fid))
-    return new Map(Object.entries(v ? JSON.parse(v) : {}))
+    const v = localStorage.getItem(arrangeKey(fid))
+    return ARRANGEMENTS.some((a) => a.id === v) ? v : 'layered'
   } catch {
-    return new Map()
+    return 'layered'
   }
 }
-function writeOverrides(fid, map) {
+
+/**
+ * 手動搬過的卡片位置,存在這台裝置(每個家族 × 排版方式一份)。
+ * 存的是「相對於自動排版位置的位移」,所以自動排版因為新增成員 / 演算法更新而變動時,搬過的卡片會跟著自己那一家移動,
+ * 不會停在舊座標上插進別人中間(v1 存絕對座標,已淘汰)。
+ */
+const layoutKey = (fid, arrangement) => `familytree:layout:v2:${fid}:${arrangement}`
+function readOverrides(fid, arrangement) {
+  const key = layoutKey(fid, arrangement)
   try {
-    if (map.size === 0) localStorage.removeItem(layoutKey(fid))
-    else localStorage.setItem(layoutKey(fid), JSON.stringify(Object.fromEntries(map)))
+    localStorage.removeItem(`familytree:layout:${fid}`) // 舊版絕對座標
+    const v = localStorage.getItem(key)
+    return { key, map: new Map(Object.entries(v ? JSON.parse(v) : {})) }
+  } catch {
+    return { key, map: new Map() }
+  }
+}
+function writeOverrides({ key, map }) {
+  try {
+    if (map.size === 0) localStorage.removeItem(key)
+    else localStorage.setItem(key, JSON.stringify(Object.fromEntries(map)))
   } catch {
     /* ignore */
   }
+}
+
+/** 從卡片中心朝 toward 方向走到卡片邊緣的點(放射排版的血管從卡片邊緣出發,而不是藏在卡片底下) */
+function rectEdgePoint(box, toward) {
+  const cx = box.x + box.w / 2
+  const cy = box.y + box.h / 2
+  const dx = toward.x - cx
+  const dy = toward.y - cy
+  if (!dx && !dy) return { x: cx, y: cy }
+  const t = Math.min(dx ? box.w / 2 / Math.abs(dx) : Infinity, dy ? box.h / 2 / Math.abs(dy) : Infinity)
+  return { x: cx + dx * t, y: cy + dy * t }
 }
 
 export default function Tree() {
@@ -129,12 +161,29 @@ function TreeCanvas() {
   const navigate = useNavigate()
   const { fitView, setCenter } = useReactFlow()
 
-  const layout = useMemo(() => layoutTree(graph, terms, viewpointId), [graph, terms, viewpointId])
+  // ---- 排版方式 ----
+  const [arrangement, setArrangement] = useState(() => readArrangement(familyId))
+  useEffect(() => setArrangement(readArrangement(familyId)), [familyId])
+  useEffect(() => {
+    try {
+      localStorage.setItem(arrangeKey(familyId), arrangement)
+    } catch {
+      /* ignore */
+    }
+  }, [familyId, arrangement])
+  const radial = arrangement === 'radial'
+  const layout = useMemo(() => (radial ? layoutRadial(graph, viewpointId) : layoutTree(graph, terms, viewpointId)), [radial, graph, terms, viewpointId])
+  const layoutRef = useRef(layout)
+  layoutRef.current = layout
 
   // ---- 手動排版 ----
-  const [overrides, setOverrides] = useState(() => readOverrides(familyId))
-  useEffect(() => setOverrides(readOverrides(familyId)), [familyId])
-  useEffect(() => writeOverrides(familyId, overrides), [familyId, overrides])
+  const [ov, setOv] = useState(() => readOverrides(familyId, arrangement))
+  useEffect(() => setOv(readOverrides(familyId, arrangement)), [familyId, arrangement])
+  useEffect(() => {
+    if (ov.key === layoutKey(familyId, arrangement)) writeOverrides(ov) // 切換家族 / 排版時,舊的 map 不要寫進新 key
+  }, [familyId, arrangement, ov])
+  const overrides = ov.map
+  const setOverrides = useCallback((updater) => setOv((prev) => ({ key: prev.key, map: typeof updater === 'function' ? updater(prev.map) : updater })), [])
   const [draggingId, setDraggingId] = useState(null)
   const [layoutMode, setLayoutMode] = useState(false)
   const [selectedId, setSelectedId] = useState(null)
@@ -157,14 +206,18 @@ function TreeCanvas() {
   }, [familyId, view])
 
   const positions = useMemo(() => {
-    const out = new Map(layout.positions)
-    for (const [id, p] of overrides) if (out.has(id)) out.set(id, p)
+    const out = new Map()
+    for (const [id, p] of layout.positions) {
+      const d = overrides.get(id)
+      out.set(id, d ? { x: p.x + d.dx, y: p.y + d.dy } : p)
+    }
     return out
   }, [layout, overrides])
   const resetLayout = () => setOverrides(new Map())
 
-  // ---- 連接點:同一對父母(或單親)先匯合成一個點,再從那個點分岔給各個孩子 ----
+  // ---- 連接點:同一對父母(或單親)先匯合成一個點,再從那個點分岔給各個孩子(放射排版直接連,不用連接點) ----
   const junctions = useMemo(() => {
+    if (radial) return new Map()
     const childParents = new Map()
     for (const r of parentChild) {
       if (!positions.has(r.parent_id) || !positions.has(r.child_id)) continue
@@ -189,7 +242,7 @@ function TreeCanvas() {
       out.set(key, { id: `junction-${key}`, x: px, y, parentIds: g.parentIds, childIds: g.childIds })
     }
     return out
-  }, [parentChild, positions])
+  }, [radial, parentChild, positions])
 
   // 每張卡片的實際尺寸與位置:依顯示方式縮放,並置中在原本的排版格子裡
   const cards = useMemo(
@@ -221,12 +274,16 @@ function TreeCanvas() {
   // React Flow 拖曳回報的是節點左上角;卡片依顯示方式縮放後是置中在排版格子裡的,換算回格子位置再存
   const cardsRef = useRef(cards)
   cardsRef.current = cards
-  const applyDragPosition = useCallback((id, position) => {
-    const c = cardsRef.current.find((x) => x.p.id === id)
-    if (!c || !position) return
-    const slot = { x: position.x - (NODE_W - c.w) / 2, y: position.y - (NODE_H - c.h) / 2 }
-    setOverrides((prev) => new Map(prev).set(id, slot))
-  }, [])
+  const applyDragPosition = useCallback(
+    (id, position) => {
+      const c = cardsRef.current.find((x) => x.p.id === id)
+      const auto = layoutRef.current.positions.get(id)
+      if (!c || !position || !auto) return
+      const slot = { x: position.x - (NODE_W - c.w) / 2, y: position.y - (NODE_H - c.h) / 2 }
+      setOverrides((prev) => new Map(prev).set(id, { dx: Math.round(slot.x - auto.x), dy: Math.round(slot.y - auto.y) }))
+    },
+    [setOverrides],
+  )
   // 受控模式:React Flow 把位置變更丟回來,我們寫進 overrides 再由 nodes 重新算出位置
   const onNodesChange = useCallback(
     (changes) => {
@@ -265,8 +322,8 @@ function TreeCanvas() {
             if (a === b) continue
             const ax = a.x + a.w / 2
             const bx = b.x + b.w / 2
-            if (isParent(a.p.id, b.p.id)) {
-              // 親子:a 下緣 → 中間高度 → 橫移到 b 的正上方 → b 上緣(只在 b 就在下一列時畫,搬遠了就不畫)
+            if (!radial && isParent(a.p.id, b.p.id)) {
+              // 親子:a 下緣 → 中間高度 → 橫移到 b 的正上方 → b 上緣(只在 b 就在下一列時畫,搬遠了就不畫;放射排版沒有列,不畫走廊)
               const gapTop = a.y + a.h
               const gapBottom = b.y
               if (gapBottom - gapTop < 12 || gapBottom - gapTop > (NODE_H + 90) * 1.2) continue
@@ -301,7 +358,7 @@ function TreeCanvas() {
         }
       })
       .filter(Boolean)
-  }, [households, cards, graph])
+  }, [households, cards, graph, radial])
 
   const nodes = useMemo(
     () => [
@@ -333,6 +390,30 @@ function TreeCanvas() {
 
   const edges = useMemo(() => {
     const out = []
+    if (radial) {
+      // 放射:父母 → 孩子直接連(兩端寬、中段細),配偶之間一小段;都從卡片邊緣出發、直線
+      const boxOf = new Map(cards.map((c) => [c.p.id, c]))
+      const points = (a, b) => {
+        const ca = { x: a.x + a.w / 2, y: a.y + a.h / 2 }
+        const cb = { x: b.x + b.w / 2, y: b.y + b.h / 2 }
+        const s = rectEdgePoint(a, cb)
+        const t = rectEdgePoint(b, ca)
+        return { sx: s.x, sy: s.y, tx: t.x, ty: t.y }
+      }
+      for (const r of parentChild) {
+        const a = boxOf.get(r.parent_id)
+        const b = boxOf.get(r.child_id)
+        if (!a || !b) continue
+        out.push({ id: `pc-${r.parent_id}-${r.child_id}`, source: r.parent_id, target: r.child_id, sourceHandle: 'bottom', targetHandle: 'top', type: 'vessel', data: { kind: 'direct', route: 'straight', points: points(a, b) } })
+      }
+      for (const s of spouses) {
+        const a = boxOf.get(s.person_a_id)
+        const b = boxOf.get(s.person_b_id)
+        if (!a || !b) continue
+        out.push({ id: `sp-${s.id}`, source: s.person_a_id, target: s.person_b_id, sourceHandle: 'bottom', targetHandle: 'top', type: 'vessel', data: { kind: 'spouse', status: s.status || 'married', route: 'straight', label: SPOUSE_LABEL[s.status], points: points(a, b) } })
+      }
+      return out
+    }
     for (const j of junctions.values()) {
       for (const pid of j.parentIds) out.push({ id: `pc-in-${j.id}-${pid}`, source: pid, target: j.id, sourceHandle: 'bottom', targetHandle: 'top', type: 'vessel', data: { kind: 'parent' } })
       for (const cid of j.childIds) out.push({ id: `pc-out-${j.id}-${cid}`, source: j.id, target: cid, sourceHandle: 'bottom', targetHandle: 'top', type: 'vessel', data: { kind: 'child' } })
@@ -355,17 +436,30 @@ function TreeCanvas() {
       })
     }
     return out
-  }, [junctions, spouses, peopleById, positions])
+  }, [radial, cards, parentChild, junctions, spouses, peopleById, positions])
 
+  // 點卡片:平常跳出這個人的快速選單(看詳細 / 以這個人為基準新增父母、子女、配偶、兄弟姊妹);編輯排版時是選取
+  const [menuId, setMenuId] = useState(null)
   const onNodeClick = useCallback(
     (_e, node) => {
       if (node.type !== 'person' || Date.now() < suppressClickUntil.current) return
       if (layoutMode) setSelectedId(node.id) // 編輯排版:點一下 = 選取,不開詳細頁
-      else navigate(`/people/${node.id}`)
+      else setMenuId((cur) => (cur === node.id ? null : node.id))
     },
-    [navigate, layoutMode],
+    [layoutMode],
   )
-  const onPaneClick = useCallback(() => setSelectedId(null), [])
+  const onPaneClick = useCallback(() => {
+    setSelectedId(null)
+    setMenuId(null)
+  }, [])
+  useEffect(() => setMenuId(null), [layoutMode])
+  const menuPerson = menuId ? peopleById.get(menuId) : null
+  const ADD_OPTIONS = [
+    ['parent', '父母'],
+    ['child', '子女'],
+    ['spouse', '配偶 / 伴侶'],
+    ['sibling', '兄弟姊妹'],
+  ]
 
   const toggleViewStat = (id) => setView((v) => ({ ...v, stats: v.stats.includes(id) ? v.stats.filter((x) => x !== id) : [...v.stats, id] }))
   const currentMode = VIEW_MODES.find((m) => m.id === view.mode) || VIEW_MODES[0]
@@ -447,11 +541,14 @@ function TreeCanvas() {
           <button onClick={toggleLayoutMode} className={`chip text-xs shadow-sm ${layoutMode ? 'chip-active' : ''}`}>
             {layoutMode ? '✓ 完成排版' : '✋ 編輯排版'}
           </button>
-          {layoutMode && overrides.size > 0 && (
-            <button onClick={resetLayout} className="chip text-xs shadow-sm">
+          {overrides.size > 0 && (
+            <button onClick={resetLayout} className="chip text-xs shadow-sm" title="清掉手動搬過的位置,回到自動排版">
               ↺ 重新排版
             </button>
           )}
+          <button onClick={() => setArrangement((a) => (a === 'radial' ? 'layered' : 'radial'))} className={`chip text-xs shadow-sm ${radial ? 'chip-active' : ''}`} title={ARRANGEMENTS.find((a) => a.id === arrangement)?.hint}>
+            {radial ? '☀ 放射' : '☰ 分層'}
+          </button>
           <button onClick={() => setViewOpen((o) => !o)} className={`chip text-xs shadow-sm ${view.mode !== 'default' ? 'chip-active' : ''}`}>
             👁 {view.mode === 'default' ? '顯示方式' : currentMode.label}
           </button>
@@ -482,6 +579,15 @@ function TreeCanvas() {
             ))}
           </div>
           <p className="mt-2 text-xs text-muted">{currentMode.hint}</p>
+          <p className="mb-1.5 mt-3 text-sm font-semibold text-ink">排版</p>
+          <div className="flex flex-wrap gap-1.5">
+            {ARRANGEMENTS.map((a) => (
+              <button key={a.id} onClick={() => setArrangement(a.id)} className={`chip text-xs ${arrangement === a.id ? 'chip-active' : ''}`}>
+                {a.icon} {a.label}
+              </button>
+            ))}
+          </div>
+          <p className="mt-2 text-xs text-muted">{ARRANGEMENTS.find((a) => a.id === arrangement)?.hint}</p>
           {view.mode === 'custom' && (
             <div className="mt-2">
               <p className="mb-1.5 text-xs text-muted">挑要看的屬性(可多選),卡片大小依這幾項的平均分數決定;負面屬性會反過來算。{view.stats.length === 0 && ' 還沒選任何屬性,大家一樣大。'}</p>
@@ -497,6 +603,39 @@ function TreeCanvas() {
         </div>
       )}
 
+      {menuPerson && !layoutMode && (
+        <div className="absolute inset-x-3 bottom-3 z-10 rounded-2xl bg-surface p-3 shadow-lg ring-1 ring-line">
+          <div className="flex items-center gap-3">
+            <Avatar person={menuPerson} size="md" />
+            <div className="min-w-0 flex-1">
+              <p className="truncate text-sm font-semibold text-ink">
+                {menuPerson.name}
+                {menuPerson.nicknames?.length > 0 && <span className="ml-1 text-xs font-normal text-muted">{menuPerson.nicknames.join('、')}</span>}
+              </p>
+              <div className="mt-0.5 flex items-center gap-1.5 text-xs text-muted">
+                {terms.get(menuId) ? <TermBadge result={terms.get(menuId)} /> : <span className="term term-none">未連結</span>}
+                <span>{ageLabel(menuPerson)}</span>
+              </div>
+            </div>
+            <button onClick={() => setMenuId(null)} className="rounded-full px-2 py-1 text-xs text-muted" aria-label="關閉">
+              ✕
+            </button>
+          </div>
+          <div className="mt-3 grid grid-cols-2 gap-1.5">
+            <Link to={`/people/${menuId}`} className="btn-secondary btn-sm col-span-2">
+              查看詳細
+            </Link>
+            {canEdit &&
+              ADD_OPTIONS.map(([rel, label]) => (
+                <Link key={rel} to={`/people/new?rel=${rel}&of=${menuId}`} className="btn-primary btn-sm">
+                  ＋ {label}
+                </Link>
+              ))}
+          </div>
+          {canEdit && <p className="mt-2 text-[11px] text-muted">新增的人會直接以「{menuPerson.name}」為基準建立關係。</p>}
+        </div>
+      )}
+
       <div className="pointer-events-none absolute inset-x-0 bottom-0 flex flex-col items-start gap-1.5 p-3">
         {layoutMode && (
           <p className="pointer-events-auto inline-block rounded-xl bg-accent-soft px-3 py-1.5 text-xs text-accent shadow-sm">
@@ -505,7 +644,7 @@ function TreeCanvas() {
         )}
         {layout.unlinked.length > 0 && viewpointId && (
           <p className="pointer-events-auto inline-block rounded-xl bg-surface-2 px-3 py-1.5 text-xs text-muted shadow-sm">
-            有 {layout.unlinked.length} 位成員尚未與視角相連(排在最下方),請補上關係。
+            有 {layout.unlinked.length} 位成員尚未與視角相連(排在最下方{radial ? '一排' : ''}),請補上關係。
           </p>
         )}
       </div>

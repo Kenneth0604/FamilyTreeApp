@@ -10,13 +10,14 @@ export default function TermBadge({ result, className = '', size = 'xs', showHin
   if (!result) return <span className={`term term-none ${text} ${className}`}>未連結</span>
   const kind = result.kind
   const title =
-    kind === 'fallback'
+    result.hint ??
+    (kind === 'fallback'
       ? '系統無法給出固定稱謂,以組合方式推算'
       : result.needsBirthday
         ? '填寫生日可讓稱謂更精確'
         : kind === 'approx'
           ? '性別未指定,以中性描述呈現'
-          : ''
+          : '')
   return (
     <span className={`term term-${kind} ${text} ${className}`} title={title}>
       {result.term}
