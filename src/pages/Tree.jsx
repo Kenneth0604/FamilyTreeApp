@@ -183,7 +183,33 @@ function TreeCanvas() {
     }
   }, [familyId, arrangement])
   const radial = arrangement === 'radial'
-  const layout = useMemo(() => (radial ? layoutRadial(graph, viewpointId) : layoutTree(graph, terms, viewpointId)), [radial, graph, terms, viewpointId])
+
+  // ---- 顯示方式 ----
+  const [view, setView] = useState(() => readView(familyId))
+  const [viewOpen, setViewOpen] = useState(false)
+  useEffect(() => setView(readView(familyId)), [familyId])
+  useEffect(() => {
+    try {
+      localStorage.setItem(viewKey(familyId), JSON.stringify(view))
+    } catch {
+      /* ignore */
+    }
+  }, [familyId, view])
+  // 每個人依顯示方式的呈現(null = 預設)與卡片縮放倍率
+  const presentations = useMemo(() => new Map(people.map((p) => [p.id, view.mode === 'default' ? null : viewPresentation(p, view)])), [people, view])
+  const scaleOf = useCallback(
+    (id) => {
+      const pres = presentations.get(id)
+      return pres ? scaleFromLevel(pres.level) : 1
+    },
+    [presentations],
+  )
+
+  // 排版時就用放大後的卡片寬度,大卡片才不會疊到隔壁、蓋掉別人的角標
+  const layout = useMemo(() => {
+    const widthOf = (id) => NODE_W * scaleOf(id)
+    return radial ? layoutRadial(graph, viewpointId, { widthOf }) : layoutTree(graph, terms, viewpointId, { widthOf })
+  }, [radial, graph, terms, viewpointId, scaleOf])
   const layoutRef = useRef(layout)
   layoutRef.current = layout
 
@@ -204,18 +230,6 @@ function TreeCanvas() {
     setSelectedId(null)
   }
 
-  // ---- 顯示方式 ----
-  const [view, setView] = useState(() => readView(familyId))
-  const [viewOpen, setViewOpen] = useState(false)
-  useEffect(() => setView(readView(familyId)), [familyId])
-  useEffect(() => {
-    try {
-      localStorage.setItem(viewKey(familyId), JSON.stringify(view))
-    } catch {
-      /* ignore */
-    }
-  }, [familyId, view])
-
   const positions = useMemo(() => {
     const out = new Map()
     for (const [id, p] of layout.positions) {
@@ -225,6 +239,16 @@ function TreeCanvas() {
     return out
   }, [layout, overrides])
   const resetLayout = () => setOverrides(new Map())
+  // 卡片的實際矩形:x 就是排版給的位置(寬度已算進去),縮放後在列內垂直置中
+  const boxes = useMemo(() => {
+    const out = new Map()
+    for (const [id, slot] of positions) {
+      const s = scaleOf(id)
+      const h = NODE_H * s
+      out.set(id, { s, x: slot.x, y: slot.y + (NODE_H - h) / 2, w: NODE_W * s, h })
+    }
+    return out
+  }, [positions, scaleOf])
 
   // ---- 連接點:同一對父母(或單親)先匯合成一個點,再從那個點分岔給各個孩子(放射排版直接連,不用連接點) ----
   const junctions = useMemo(() => {
@@ -243,14 +267,14 @@ function TreeCanvas() {
     }
     const out = new Map()
     for (const [key, g] of groups) {
-      const parentPos = g.parentIds.map((id) => positions.get(id))
-      const childPos = g.childIds.map((id) => positions.get(id))
-      const px = parentPos.reduce((s, p) => s + p.x, 0) / parentPos.length + NODE_W / 2
-      const parentBottom = Math.max(...parentPos.map((p) => p.y)) + NODE_H
-      const childTop = Math.min(...childPos.map((p) => p.y))
+      const parentBox = g.parentIds.map((id) => boxes.get(id))
+      const childBox = g.childIds.map((id) => boxes.get(id))
+      const px = parentBox.reduce((s, b) => s + b.x + b.w / 2, 0) / parentBox.length
+      const parentBottom = Math.max(...parentBox.map((b) => b.y + b.h))
+      const childTop = Math.min(...childBox.map((b) => b.y))
       // 連接點放在列間空隙偏上(0.45)的位置,靠近下一列頂端的那一段留給配偶繞行線;孩子被搬到父母上方時放父母下方一點,線才不會反折
       const y = childTop > parentBottom ? parentBottom + (childTop - parentBottom) * 0.45 : parentBottom + 24
-      const xs = [...parentPos, ...childPos].map((p) => p.x + NODE_W / 2)
+      const xs = [...parentBox, ...childBox].map((b) => b.x + b.w / 2)
       out.set(key, { id: `junction-${key}`, x: px, y, parentIds: g.parentIds, childIds: g.childIds, zone: Math.round(parentBottom), gap: Math.max(0, childTop - parentBottom), minX: Math.min(...xs), maxX: Math.max(...xs), thin: false })
     }
     // 同一段列間空隙裡,橫桿(父母 → 連接點 → 孩子的水平段)會左右延伸;範圍重疊的家庭全疊在同一個高度會看不懂。
@@ -279,36 +303,28 @@ function TreeCanvas() {
       }
     }
     return out
-  }, [radial, parentChild, positions])
+  }, [radial, parentChild, boxes])
 
-  // 每張卡片的實際尺寸與位置:依顯示方式縮放,並置中在原本的排版格子裡
+  // 每張卡片:實際尺寸與位置(boxes)+ 角標 / 色條
   const cards = useMemo(
     () =>
       people
-        .filter((p) => positions.has(p.id))
+        .filter((p) => boxes.has(p.id))
         .map((p) => {
-          const pres = view.mode === 'default' ? null : viewPresentation(p, view)
-          const s = pres ? scaleFromLevel(pres.level) : 1
+          const pres = presentations.get(p.id)
           const power = totalPower(p) // 地位 + 壽命加成
-          const slot = positions.get(p.id)
-          const w = NODE_W * s
-          const h = NODE_H * s
           return {
             p,
-            s,
-            x: slot.x + (NODE_W - w) / 2,
-            y: slot.y + (NODE_H - h) / 2,
-            w,
-            h,
+            ...boxes.get(p.id),
             badge: pres ? pres.badge : power !== POWER_DEFAULT ? `${powerIcon(power)} ${power}` : '',
             badgeStrong: pres ? (pres.level ?? 0) >= 0.7 : power >= 8,
             tint: pres?.tint ?? null,
           }
         }),
-    [people, positions, view],
+    [people, boxes, presentations],
   )
 
-  // React Flow 拖曳回報的是節點左上角;卡片依顯示方式縮放後是置中在排版格子裡的,換算回格子位置再存
+  // React Flow 拖曳回報的是節點左上角;卡片縮放後在列內是垂直置中的,換算回排版格子位置再存
   const cardsRef = useRef(cards)
   cardsRef.current = cards
   const applyDragPosition = useCallback(
@@ -316,7 +332,7 @@ function TreeCanvas() {
       const c = cardsRef.current.find((x) => x.p.id === id)
       const auto = layoutRef.current.positions.get(id)
       if (!c || !position || !auto) return
-      const slot = { x: position.x - (NODE_W - c.w) / 2, y: position.y - (NODE_H - c.h) / 2 }
+      const slot = { x: position.x, y: position.y - (NODE_H - c.h) / 2 }
       setOverrides((prev) => new Map(prev).set(id, { dx: Math.round(slot.x - auto.x), dy: Math.round(slot.y - auto.y) }))
     },
     [setOverrides],

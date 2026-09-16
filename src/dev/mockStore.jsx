@@ -6,8 +6,8 @@ const P = (id, name, gender, birth_date, extra = {}) => ({ id, name, gender, bir
 
 // 兩邊的家族都有:爸爸這邊(阿公阿嬤、大伯一家、爸爸的前伴侶與半血緣弟)、媽媽這邊(外公外婆、阿姨一家)、我這邊(太太、兒子)
 const people = [
-  P('gp', '阿公', 'male', '1938', { power: 9, is_deceased: true, death_date: '2021-03' }),
-  P('gm', '阿嬤', 'female', '1942', { nicknames: ['阿母'] }),
+  P('gp', '阿公', 'male', '1938', { power: 9, is_deceased: true, death_date: '2021-03', stats: { fun: 9, smart: 8 } }),
+  P('gm', '阿嬤', 'female', '1942', { nicknames: ['阿母'], stats: { fun: 10, cooking: 10 } }),
   P('uncle', '大伯', 'male', '1962', { birth_order: 1 }),
   P('aunt_in_law', '大伯母', 'female', '1963'),
   P('cousin', '堂哥', 'male', '1988'),

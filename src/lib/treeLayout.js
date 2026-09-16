@@ -28,9 +28,10 @@ const COORD_SWEEPS = 3
  * @param {import('./kinship/graph.js').Graph} graph
  * @param {Map<string, {generation:number}>} terms  computeAllRelationTerms 的結果
  * @param {string|null} viewpointId
+ * @param {{ widthOf?: (id:string) => number }} [opts] 每張卡片的實際寬度(顯示方式放大時傳進來,排版才不會讓大卡片疊到隔壁)
  * @returns {{ positions: Map<string,{x:number,y:number}>, rows: Map<number,string[]>, unlinked: string[] }}
  */
-export function layoutTree(graph, terms, viewpointId) {
+export function layoutTree(graph, terms, viewpointId, { widthOf = () => NODE_W } = {}) {
   const ids = [...graph.persons.keys()]
   if (ids.length === 0) return { positions: new Map(), rows: new Map(), unlinked: [] }
 
@@ -77,7 +78,7 @@ export function layoutTree(graph, terms, viewpointId) {
       if (unitOf.has(id)) continue
       const members = collectUnit(id, (x) => activeSpouses(x).filter((s) => gen.get(s) === g))
       const unit = { members: orderMembers(members, graph), row: rowIndex.get(g), idx: 0, x: 0, w: 0, up: new Map(), down: new Map(), side: new Set(), childRank: new Map() }
-      unit.w = unit.members.length * NODE_W + (unit.members.length - 1) * COUPLE_GAP
+      unit.w = unit.members.reduce((s, m) => s + widthOf(m), 0) + (unit.members.length - 1) * COUPLE_GAP
       for (const m of unit.members) unitOf.set(m, unit)
       layers[unit.row].push(unit)
     }
@@ -230,7 +231,7 @@ export function layoutTree(graph, terms, viewpointId) {
       let x = u.x - u.w / 2
       for (const m of u.members) {
         positions.set(m, { x, y: u.row * (NODE_H + GAP_Y) })
-        x += NODE_W + COUPLE_GAP
+        x += widthOf(m) + COUPLE_GAP
       }
     }
   }
@@ -255,7 +256,7 @@ export const RING_GAP = NODE_H + 40 // 相鄰兩圈的最小半徑差:卡片高�
  *
  * @returns {{ positions: Map<string,{x:number,y:number}>, rows: Map, unlinked: string[], ring: number, center: {x:number,y:number} }}
  */
-export function layoutRadial(graph, viewpointId) {
+export function layoutRadial(graph, viewpointId, { widthOf = () => NODE_W } = {}) {
   const ids = [...graph.persons.keys()]
   if (ids.length === 0) return { positions: new Map(), rows: new Map(), unlinked: [], ring: 0, center: { x: 0, y: 0 } }
   const activeSpouses = (id) => (graph.spousesOf.get(id) || []).filter((s) => isActiveSpouse(s.status)).map((s) => s.id)
@@ -266,7 +267,7 @@ export function layoutRadial(graph, viewpointId) {
   for (const id of ids) {
     if (unitOf.has(id)) continue
     const members = orderMembers(collectUnit(id, activeSpouses), graph)
-    const u = { members, w: members.length * NODE_W + (members.length - 1) * COUPLE_GAP, kin: new Map(), side: new Set(), depth: -1, dir: null, parent: null, children: [], leaves: 1, a0: 0, a1: 0, angle: 0 }
+    const u = { members, w: members.reduce((s, m) => s + widthOf(m), 0) + (members.length - 1) * COUPLE_GAP, kin: new Map(), side: new Set(), depth: -1, dir: null, parent: null, children: [], leaves: 1, a0: 0, a1: 0, angle: 0 }
     for (const m of members) unitOf.set(m, u)
     units.push(u)
   }
@@ -424,7 +425,7 @@ export function layoutRadial(graph, viewpointId) {
     let x = cx - u.w / 2
     for (const m of u.members) {
       positions.set(m, { x, y: cy - NODE_H / 2 })
-      x += NODE_W + COUPLE_GAP
+      x += widthOf(m) + COUPLE_GAP
     }
   }
   for (const u of order) placeUnit(u, radii[u.depth] * Math.cos(u.angle), radii[u.depth] * Math.sin(u.angle))
