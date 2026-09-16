@@ -1,20 +1,51 @@
-import { ageFromBirth, formatBirth } from './kinship/birth.js'
+import { ageFromBirth, formatBirth, parseBirth } from './kinship/birth.js'
 
 export const GENDER_LABEL = { male: '男', female: '女', unspecified: '未指定' }
 /** 配偶 / 伴侶關係狀態(顯示順序即此順序) */
 export const SPOUSE_STATUS_LABEL = { married: '已婚', partner: '伴侶(未婚)', divorced: '離婚', ex_partner: '前伴侶', widowed: '喪偶' }
 
-/** 「36 歲」「約 36 歲」「已故」;沒生日回空字串 */
+/**
+ * 壽命 / 年齡:在世者算到今天,已故者算到 death_date(生日與逝世日都要有)。
+ * @returns {{ years:number, approx:boolean, deceased:boolean } | null}
+ */
+export function lifespan(person, now = new Date()) {
+  if (!person) return null
+  const b = parseBirth(person.birth_date)
+  if (!b) return null
+  if (!person.is_deceased) {
+    const a = ageFromBirth(person.birth_date, now)
+    return a ? { years: a.age, approx: a.approx, deceased: false } : null
+  }
+  const d = parseBirth(person.death_date)
+  if (!d) return null
+  let years = d.y - b.y
+  const approx = b.m == null || d.m == null || b.d == null || d.d == null
+  if (b.m != null && d.m != null && (d.m < b.m || (d.m === b.m && b.d != null && d.d != null && d.d < b.d))) years -= 1
+  return { years: Math.max(0, years), approx, deceased: true }
+}
+
+/** 已故者的歲數稱法(傳統:60 以下享年、60–89 享壽、90–99 享耆壽、100 以上享嵩壽) */
+export function lifespanPrefix(years) {
+  if (years >= 100) return '享嵩壽'
+  if (years >= 90) return '享耆壽'
+  if (years >= 60) return '享壽'
+  return '享年'
+}
+
+/** 「36 歲」「約 36 歲」「享壽 86 歲」「已故」;沒生日回空字串 */
 export function ageLabel(person) {
   if (!person) return ''
-  if (person.is_deceased) return '已故'
-  const a = ageFromBirth(person.birth_date)
-  if (!a) return ''
-  return `${a.approx ? '約 ' : ''}${a.age} 歲`
+  const l = lifespan(person)
+  if (!l) return person.is_deceased ? '已故' : ''
+  const n = `${l.approx ? '約 ' : ''}${l.years} 歲`
+  return l.deceased ? `${lifespanPrefix(l.years)} ${n}` : n
 }
 
 export function birthLabel(person) {
   return formatBirth(person?.birth_date)
+}
+export function deathLabel(person) {
+  return formatBirth(person?.death_date)
 }
 
 const CN_NUM = ['', '大', '二', '三', '四', '五', '六', '七', '八', '九', '十']
@@ -123,11 +154,38 @@ export function statDescriptor(stat, value) {
   return '普通'
 }
 
-/** 戰力(家庭地位)0–10:影響樹狀圖卡片大小 */
+/**
+ * 戰力 = 地位(手動 0–10,這個人在家族裡的份量)+ 壽命加成(自動 0–5,活得久很帥)。
+ * 影響樹狀圖卡片大小(顯示方式「家庭地位」)。
+ */
 export const POWER_DEFAULT = 5
+export const POWER_BASE_MAX = 10
+export const LONGEVITY_MAX = 5
+export const POWER_MAX = POWER_BASE_MAX + LONGEVITY_MAX
+/** 壽命加成:[歲數下限, 加成, 稱號] */
+export const LONGEVITY_LEVELS = [
+  [100, 5, '人瑞'],
+  [90, 4, '鮐背'],
+  [80, 3, '耄耋'],
+  [70, 2, '古稀'],
+  [60, 1, '花甲'],
+]
+/** @returns {{ bonus:number, title:string|null, years:number|null, deceased:boolean }} 沒生日(或已故但沒逝世日)→ 加成 0 */
+export function longevityBonus(person, now = new Date()) {
+  const l = lifespan(person, now)
+  if (!l) return { bonus: 0, title: null, years: null, deceased: Boolean(person?.is_deceased) }
+  const lv = LONGEVITY_LEVELS.find(([min]) => l.years >= min)
+  return { bonus: lv ? lv[1] : 0, title: lv ? lv[2] : null, years: l.years, deceased: l.deceased }
+}
+/** 地位(手動填的那一格) */
+export const basePower = (person) => (Number.isFinite(person?.power) ? person.power : POWER_DEFAULT)
+/** 戰力總分 0–15 */
+export const totalPower = (person, now) => basePower(person) + longevityBonus(person, now).bonus
+
 export const POWER_LEVELS = [
-  [10, '家族大魔王'],
-  [9, '話事人'],
+  [15, '不朽傳說'],
+  [12, '家族大魔王'],
+  [10, '話事人'],
   [7, '有份量'],
   [5, '一般成員'],
   [3, '小咖'],
@@ -137,11 +195,7 @@ export function powerLabel(power) {
   const p = Number.isFinite(power) ? power : POWER_DEFAULT
   return POWER_LEVELS.find(([min]) => p >= min)[1]
 }
-/** 卡片縮放:0 → 0.8、5 → 1.0、10 → 1.2(最大不超過卡片間距,避免重疊) */
-export function powerScale(power) {
-  const p = Number.isFinite(power) ? power : POWER_DEFAULT
-  return 0.8 + p * 0.04
-}
+export const powerIcon = (power) => (power >= 12 ? '👑' : '⚔')
 
 const RANKS = [
   [90, 'S', '傳說級人物'],
@@ -189,7 +243,7 @@ export const householdColor = (id) => (HOUSEHOLD_COLORS.find((c) => c.id === id)
 // ---- 樹狀圖顯示方式 ----
 export const VIEW_MODES = [
   { id: 'default', label: '預設', hint: '大家一樣大' },
-  { id: 'power', label: '家庭地位', hint: '戰力越高卡片越大' },
+  { id: 'power', label: '家庭地位', hint: '戰力(地位 + 壽命加成)越高卡片越大' },
   { id: 'rating', label: '讚讚人指數', hint: '指數越高卡片越大' },
   { id: 'politics', label: '政治立場', hint: '卡片頂端用藍 / 綠 / 白標色' },
   { id: 'custom', label: '自訂', hint: '挑幾項屬性,依它們的平均決定大小' },
@@ -202,8 +256,8 @@ export const VIEW_MODES = [
 export function viewPresentation(person, view) {
   const mode = view?.mode || 'default'
   if (mode === 'power') {
-    const p = Number.isFinite(person.power) ? person.power : POWER_DEFAULT
-    return { level: p / 10, badge: `${p >= 10 ? '👑' : '⚔'} ${p}`, tint: null }
+    const p = totalPower(person)
+    return { level: p / POWER_MAX, badge: `${powerIcon(p)} ${p}`, tint: null }
   }
   if (mode === 'rating') {
     const r = overallRating(person.stats)

@@ -6,7 +6,9 @@ import { layoutTree, NODE_W, NODE_H } from '../lib/treeLayout.js'
 import Avatar from '../components/Avatar.jsx'
 import TermBadge from '../components/TermBadge.jsx'
 import VesselEdge from '../components/VesselEdge.jsx'
-import { ageLabel, birthOrderLabel, POWER_DEFAULT, STATS, VIEW_MODES, viewPresentation, scaleFromLevel, householdColor } from '../lib/format.js'
+import { ageLabel, birthOrderLabel, POWER_DEFAULT, totalPower, powerIcon, STATS, VIEW_MODES, viewPresentation, scaleFromLevel, householdColor } from '../lib/format.js'
+import { unionOutline } from '../lib/outline.js'
+import { isActiveSpouse } from '../lib/kinship/graph.js'
 
 /**
  * 樹狀圖節點:大頭照 / 姓名(小名)/ 相對於 viewpoint 的稱謂
@@ -58,11 +60,17 @@ const JunctionNode = memo(function JunctionNode() {
   )
 })
 
-/** 小家庭:把成員卡片的外框用虛線圈起來,放在所有卡片後面、不吃任何點擊 */
+/**
+ * 小家庭:成員卡片的外框 + 成員之間的親子 / 配偶「走廊」聯集成一個不規則形狀,虛線描邊。
+ * 放在所有卡片後面、不吃任何點擊;形狀由 householdNodes 用 lib/outline.js 算好
+ */
 const HouseholdNode = memo(function HouseholdNode({ data }) {
   return (
-    <div className="relative h-full w-full rounded-3xl" style={{ border: `2px dashed ${data.color}`, background: `${data.color}14` }}>
-      <span className="absolute left-3 top-1.5 text-[11px] font-semibold" style={{ color: data.color }}>
+    <div className="relative h-full w-full">
+      <svg className="absolute inset-0 h-full w-full overflow-visible" viewBox={`${data.x} ${data.y} ${data.w} ${data.h}`} preserveAspectRatio="none">
+        <path d={data.path} fill={data.color} fillOpacity={0.08} stroke={data.color} strokeWidth={2} strokeDasharray="7 5" strokeLinejoin="round" fillRule="evenodd" />
+      </svg>
+      <span className="absolute text-[11px] font-semibold" style={{ color: data.color, left: data.labelX, top: data.labelY }}>
         ⌂ {data.name}
       </span>
     </div>
@@ -71,7 +79,9 @@ const HouseholdNode = memo(function HouseholdNode({ data }) {
 
 const nodeTypes = { person: PersonNode, junction: JunctionNode, household: HouseholdNode }
 const edgeTypes = { vessel: VesselEdge }
-const HOUSEHOLD_PAD = 14
+const HOUSEHOLD_PAD = 9 // 比夫妻卡片間距(12)的一半大一點、但小於間距,框線才不會壓到隔壁非成員的卡片
+const HOUSEHOLD_LABEL_H = 18
+const CORRIDOR_W = 40
 
 /** 樹狀圖顯示方式(存在這台裝置) */
 const viewKey = (fid) => `familytree:view:${fid}`
@@ -189,7 +199,7 @@ function TreeCanvas() {
         .map((p) => {
           const pres = view.mode === 'default' ? null : viewPresentation(p, view)
           const s = pres ? scaleFromLevel(pres.level) : 1
-          const power = Number.isFinite(p.power) ? p.power : POWER_DEFAULT
+          const power = totalPower(p) // 地位 + 壽命加成
           const slot = positions.get(p.id)
           const w = NODE_W * s
           const h = NODE_H * s
@@ -200,8 +210,8 @@ function TreeCanvas() {
             y: slot.y + (NODE_H - h) / 2,
             w,
             h,
-            badge: pres ? pres.badge : power !== POWER_DEFAULT ? `${power >= 10 ? '👑' : '⚔'} ${power}` : '',
-            badgeStrong: pres ? (pres.level ?? 0) >= 0.7 : power >= 7,
+            badge: pres ? pres.badge : power !== POWER_DEFAULT ? `${powerIcon(power)} ${power}` : '',
+            badgeStrong: pres ? (pres.level ?? 0) >= 0.7 : power >= 8,
             tint: pres?.tint ?? null,
           }
         }),
@@ -234,30 +244,64 @@ function TreeCanvas() {
     [applyDragPosition],
   )
 
+  // 小家庭的不規則外框:成員卡片(加邊距)+ 成員之間親子 / 配偶關係的走廊,聯集後描邊。
+  // 走廊只走卡片之間的空隙(親子走上下兩列之間、配偶走相鄰卡片之間),不會蓋到非成員的卡片
   const householdNodes = useMemo(() => {
     const byId = new Map(cards.map((c) => [c.p.id, c]))
+    const isCoupled = (a, b) => (graph.spousesOf.get(a) || []).some((s) => s.id === b && isActiveSpouse(s.status))
+    const isParent = (a, b) => (graph.childrenOf.get(a) || []).includes(b)
     return households
       .map((hh) => {
-        const boxes = (hh.person_ids || []).map((id) => byId.get(id)).filter(Boolean)
-        if (!boxes.length) return null
-        const minX = Math.min(...boxes.map((b) => b.x)) - HOUSEHOLD_PAD
-        const minY = Math.min(...boxes.map((b) => b.y)) - HOUSEHOLD_PAD - 16 // 上方多留名稱的空間
-        const maxX = Math.max(...boxes.map((b) => b.x + b.w)) + HOUSEHOLD_PAD
-        const maxY = Math.max(...boxes.map((b) => b.y + b.h)) + HOUSEHOLD_PAD
+        const ids = (hh.person_ids || []).filter((id) => byId.has(id))
+        if (!ids.length) return null
+        const members = ids.map((id) => byId.get(id))
+        const topY = Math.min(...members.map((b) => b.y))
+        const rects = members.map((b) => {
+          const topPad = b.y === topY ? HOUSEHOLD_PAD + HOUSEHOLD_LABEL_H : HOUSEHOLD_PAD // 最上排多留名稱的空間
+          return { x: b.x - HOUSEHOLD_PAD, y: b.y - topPad, w: b.w + HOUSEHOLD_PAD * 2, h: b.h + topPad + HOUSEHOLD_PAD }
+        })
+        for (const a of members) {
+          for (const b of members) {
+            if (a === b) continue
+            const ax = a.x + a.w / 2
+            const bx = b.x + b.w / 2
+            if (isParent(a.p.id, b.p.id)) {
+              // 親子:a 下緣 → 中間高度 → 橫移到 b 的正上方 → b 上緣(只在 b 就在下一列時畫,搬遠了就不畫)
+              const gapTop = a.y + a.h
+              const gapBottom = b.y
+              if (gapBottom - gapTop < 12 || gapBottom - gapTop > (NODE_H + 90) * 1.2) continue
+              const midY = (gapTop + gapBottom) / 2
+              rects.push({ x: ax - CORRIDOR_W / 2, y: gapTop - 1, w: CORRIDOR_W, h: midY - gapTop + CORRIDOR_W / 2 + 1 })
+              rects.push({ x: Math.min(ax, bx) - CORRIDOR_W / 2, y: midY - CORRIDOR_W / 2, w: Math.abs(ax - bx) + CORRIDOR_W, h: CORRIDOR_W })
+              rects.push({ x: bx - CORRIDOR_W / 2, y: midY - CORRIDOR_W / 2, w: CORRIDOR_W, h: gapBottom - midY + CORRIDOR_W / 2 + 1 })
+            } else if (a.x < b.x && isCoupled(a.p.id, b.p.id) && Math.abs(a.y - b.y) < NODE_H / 2) {
+              // 配偶:兩張卡片之間補一段;中間如果夾了非成員就不補
+              const left = a.x + a.w
+              const right = b.x
+              const blocked = cards.some((c) => c !== a && c !== b && Math.abs(c.y - a.y) < NODE_H / 2 && c.x < right && c.x + c.w > left)
+              if (blocked) continue
+              const cy = a.y + a.h / 2
+              rects.push({ x: left - 1, y: cy - CORRIDOR_W / 2, w: right - left + 2, h: CORRIDOR_W })
+            }
+          }
+        }
+        const outline = unionOutline(rects, 20)
+        if (!outline) return null
+        const topMember = members.find((b) => b.y === topY)
         return {
           id: `household-${hh.id}`,
           type: 'household',
-          position: { x: minX, y: minY },
-          style: { width: maxX - minX, height: maxY - minY },
+          position: { x: outline.x, y: outline.y },
+          style: { width: outline.w, height: outline.h },
           zIndex: -1,
-          data: { name: hh.name, color: householdColor(hh.color) },
+          data: { name: hh.name, color: householdColor(hh.color), path: outline.path, x: outline.x, y: outline.y, w: outline.w, h: outline.h, labelX: topMember.x - HOUSEHOLD_PAD + 10 - outline.x, labelY: topMember.y - HOUSEHOLD_PAD - HOUSEHOLD_LABEL_H + 4 - outline.y },
           draggable: false,
           selectable: false,
           focusable: false,
         }
       })
       .filter(Boolean)
-  }, [households, cards])
+  }, [households, cards, graph])
 
   const nodes = useMemo(
     () => [

@@ -8,7 +8,7 @@ import PersonPicker from '../components/PersonPicker.jsx'
 import LifeEntries from '../components/LifeEntries.jsx'
 import StatsPanel from '../components/StatsPanel.jsx'
 import PetCard from '../components/PetCard.jsx'
-import { ageLabel, birthLabel, birthOrderLabel, GENDER_LABEL, SPOUSE_STATUS_LABEL, POLITICS_BY_ID, relativeTime } from '../lib/format.js'
+import { ageLabel, birthLabel, deathLabel, birthOrderLabel, GENDER_LABEL, SPOUSE_STATUS_LABEL, POLITICS_BY_ID, relativeTime } from '../lib/format.js'
 import { computeRelationTerm } from '../lib/kinship/index.js'
 import { compareSiblings } from '../lib/kinship/birth.js'
 
@@ -108,7 +108,7 @@ export default function PersonDetail() {
                 </span>
               ))}
               {isSelf && <span className="term term-self">我</span>}
-              {person.is_deceased && <span className="chip px-2 py-0.5 text-xs">已故</span>}
+              {person.is_deceased && <span className="chip px-2 py-0.5 text-xs">{ageLabel(person) || '已故'}</span>}
             </div>
             <div className="mt-1.5">
               {viewpointId ? <TermBadge result={term} size="sm" showHint /> : <span className="text-xs text-muted">尚未設定視角</span>}
@@ -126,6 +126,12 @@ export default function PersonDetail() {
                 {birthLabel(person) || <span className="text-muted/70">未填</span>}
                 {ageLabel(person) && !person.is_deceased && <span className="ml-2 text-muted">{ageLabel(person)}</span>}
               </dd>
+              {person.is_deceased && (
+                <>
+                  <dt className="text-muted">逝世</dt>
+                  <dd className="text-ink">{deathLabel(person) || <span className="text-muted/70">未填</span>}</dd>
+                </>
+              )}
               {person.birth_order && (
                 <>
                   <dt className="text-muted">排行</dt>

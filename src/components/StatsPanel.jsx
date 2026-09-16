@@ -1,9 +1,9 @@
 import { useState } from 'react'
 import { useStore } from '../lib/store.jsx'
 import { useToast } from '../lib/toast.jsx'
-import { STATS, POWER_DEFAULT, overallRating, powerLabel, statDescriptor } from '../lib/format.js'
+import { STATS, POWER_MAX, POWER_BASE_MAX, LONGEVITY_MAX, basePower, longevityBonus, powerIcon, overallRating, powerLabel, statDescriptor, ageLabel } from '../lib/format.js'
 
-/** 戰力(家庭地位)+ 遊戲角色式屬性:數值條 + 綜合評分;editor 可拉滑桿評分 */
+/** 戰力(地位 + 壽命加成)+ 遊戲角色式屬性:數值條 + 綜合評分;editor 可拉滑桿評分 */
 export default function StatsPanel({ person }) {
   const { canEdit, updatePerson } = useStore()
   const toast = useToast()
@@ -11,9 +11,18 @@ export default function StatsPanel({ person }) {
   const [busy, setBusy] = useState(false)
 
   const stats = person.stats || {}
-  const power = Number.isFinite(person.power) ? person.power : POWER_DEFAULT
+  const power = basePower(person)
+  const longevity = longevityBonus(person)
+  const total = power + longevity.bonus
   const rated = STATS.filter((s) => Number.isFinite(stats[s.id]))
   const overall = overallRating(stats)
+  const longevityNote = longevity.years == null
+    ? person.is_deceased
+      ? '填上生日與逝世日期就會算享壽加成'
+      : person.birth_date
+        ? ''
+        : '填上生日就會自動算'
+    : `${ageLabel(person)}${longevity.title ? ` · ${longevity.title}` : ''}`
 
   async function save() {
     const clean = {}
@@ -42,14 +51,26 @@ export default function StatsPanel({ person }) {
       </div>
 
       {!draft && (
-        <div className="mb-3 flex items-center gap-2">
-          <span className="text-base leading-none">{power >= 10 ? '👑' : '⚔'}</span>
-          <span className="w-12 shrink-0 text-sm text-ink">戰力</span>
-          <div className="h-2.5 flex-1 overflow-hidden rounded-full bg-surface-2">
-            <div className="h-full rounded-full bg-accent transition-[width]" style={{ width: `${power * 10}%` }} />
+        <div className="mb-3 rounded-2xl bg-accent-soft/60 p-3">
+          <div className="flex items-center gap-2">
+            <span className="text-base leading-none">{powerIcon(total)}</span>
+            <span className="w-12 shrink-0 text-sm font-semibold text-ink">戰力</span>
+            <div className="flex h-2.5 flex-1 overflow-hidden rounded-full bg-surface-2">
+              <div className="h-full bg-accent transition-[width]" style={{ width: `${(power / POWER_MAX) * 100}%` }} />
+              <div className="h-full bg-warning transition-[width]" style={{ width: `${(longevity.bonus / POWER_MAX) * 100}%` }} />
+            </div>
+            <span className="w-6 shrink-0 text-right text-sm font-bold tabular-nums text-ink">{total}</span>
+            <span className="w-20 shrink-0 truncate text-[11px] text-muted">{powerLabel(total)}</span>
           </div>
-          <span className="w-6 shrink-0 text-right text-xs font-semibold tabular-nums text-ink">{power}</span>
-          <span className="w-20 shrink-0 truncate text-[11px] text-muted">{powerLabel(power)}</span>
+          <div className="mt-1.5 flex flex-wrap gap-x-3 gap-y-0.5 text-[11px] text-muted">
+            <span>
+              <span className="inline-block h-2 w-2 rounded-full bg-accent align-middle" /> 地位 {power}/{POWER_BASE_MAX}
+            </span>
+            <span>
+              <span className="inline-block h-2 w-2 rounded-full bg-warning align-middle" /> 壽命加成 +{longevity.bonus}/{LONGEVITY_MAX}
+              {longevityNote && <span className="ml-1">({longevityNote})</span>}
+            </span>
+          </div>
         </div>
       )}
 
@@ -85,14 +106,14 @@ export default function StatsPanel({ person }) {
         <div className="space-y-3">
           <div className="rounded-xl bg-accent-soft px-3 py-2">
             <div className="flex items-center gap-2 text-sm text-ink">
-              <span className="w-6 text-center">{draft.power >= 10 ? '👑' : '⚔'}</span>
-              <span className="flex-1 font-medium">戰力(家庭地位)</span>
+              <span className="w-6 text-center">{powerIcon(draft.power + longevity.bonus)}</span>
+              <span className="flex-1 font-medium">地位(家庭份量)</span>
               <span className="text-xs text-muted">
-                {draft.power} · {powerLabel(draft.power)}
+                {draft.power} + 壽命 {longevity.bonus} = 戰力 {draft.power + longevity.bonus} · {powerLabel(draft.power + longevity.bonus)}
               </span>
             </div>
-            <input type="range" min="0" max="10" step="1" value={draft.power} onChange={(e) => setDraft({ ...draft, power: Number(e.target.value) })} className="mt-1.5 w-full accent-accent" />
-            <p className="mt-1 text-[11px] text-muted">這個人在家族裡的份量。數字越大,樹狀圖上的卡片越大。</p>
+            <input type="range" min="0" max={POWER_BASE_MAX} step="1" value={draft.power} onChange={(e) => setDraft({ ...draft, power: Number(e.target.value) })} className="mt-1.5 w-full accent-accent" />
+            <p className="mt-1 text-[11px] text-muted">這個人在家族裡的份量。戰力 = 地位 + 壽命加成(60 歲起每 10 歲 +1,活很久很帥;已故者看享壽),數字越大樹狀圖上的卡片越大。</p>
           </div>
           <p className="text-xs text-muted">勾選要評的屬性,拉滑桿給 0–10 分。沒勾的不會顯示,也不計入讚讚人指數。標「負面」的屬性分數越高越糟,指數會反過來算。</p>
           <div className="space-y-2">

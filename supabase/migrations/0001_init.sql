@@ -69,6 +69,11 @@ create table if not exists public.people (
   updated_at   timestamptz not null default now()
 );
 
+-- 逝世日期(格式同 birth_date):有生日 + 逝世日就顯示「享壽 N 歲」,壽命也算進戰力
+alter table public.people add column if not exists death_date text;
+alter table public.people drop constraint if exists people_death_date_check;
+alter table public.people add constraint people_death_date_check check (death_date is null or death_date ~ '^\d{4}(-\d{2}(-\d{2})?)?$');
+
 alter table public.family_members
   drop constraint if exists family_members_self_person_id_fkey,
   drop constraint if exists family_members_viewpoint_person_id_fkey;

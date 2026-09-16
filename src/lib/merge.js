@@ -36,6 +36,7 @@ export function resolveSamePerson(tree, links) {
         m.nicknames = uniq([...(m.nicknames || []), ...(normName(o.name) !== normName(p.name) ? [o.name] : []), ...(o.nicknames || [])])
         m.tags = uniq([...(m.tags || []), ...(o.tags || [])])
         if (!m.birth_date && o.birth_date) m.birth_date = o.birth_date
+        if (!m.death_date && o.death_date) m.death_date = o.death_date
         if ((m.gender || 'unspecified') === 'unspecified' && o.gender && o.gender !== 'unspecified') m.gender = o.gender
         if (!m.avatar_url && o.avatar_url) m.avatar_url = o.avatar_url
         if (!m.note && o.note) m.note = o.note

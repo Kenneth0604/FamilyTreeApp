@@ -36,6 +36,9 @@ export default function PersonForm() {
   const [month, setMonth] = useState('')
   const [day, setDay] = useState('')
   const [deceased, setDeceased] = useState(false)
+  const [deathYear, setDeathYear] = useState('')
+  const [deathMonth, setDeathMonth] = useState('')
+  const [deathDay, setDeathDay] = useState('')
   const [birthOrder, setBirthOrder] = useState('')
   const [avatar, setAvatar] = useState(null)
   const [note, setNote] = useState('')
@@ -60,6 +63,10 @@ export default function PersonForm() {
       setMonth(b?.m ? String(b.m) : '')
       setDay(b?.d ? String(b.d) : '')
       setDeceased(Boolean(editing.is_deceased))
+      const d = parseBirth(editing.death_date)
+      setDeathYear(d ? String(d.y) : '')
+      setDeathMonth(d?.m ? String(d.m) : '')
+      setDeathDay(d?.d ? String(d.d) : '')
       setBirthOrder(editing.birth_order ? String(editing.birth_order) : '')
       setAvatar(editing.avatar_url || null)
       setNote(editing.note || '')
@@ -92,6 +99,8 @@ export default function PersonForm() {
     if (!name.trim()) return toast.error('請輸入姓名')
     if (hasRelation && (!relType || !anchorId)) return toast.error('請選擇這個人與樹上哪位成員是什麼關係')
     if (year && (Number(year) < 1 || Number(year) > 9999)) return toast.error('年份格式不正確')
+    if (deceased && deathYear && (Number(deathYear) < 1 || Number(deathYear) > 9999)) return toast.error('逝世年份格式不正確')
+    if (deceased && deathYear && year && Number(deathYear) < Number(year)) return toast.error('逝世日期不能早於生日')
 
     const fields = {
       name: name.trim(),
@@ -102,6 +111,7 @@ export default function PersonForm() {
       birth_date: toPartialDate(year, month, day),
       birth_order: birthOrder ? Number(birthOrder) : null,
       is_deceased: deceased,
+      death_date: deceased ? toPartialDate(deathYear, deathMonth, deathDay) : null,
       avatar_url: avatar,
       note: note.trim(),
     }
@@ -158,6 +168,7 @@ export default function PersonForm() {
 
   const yearNum = Number(year)
   const daysInMonth = month && yearNum ? new Date(yearNum, Number(month), 0).getDate() : 31
+  const deathDaysInMonth = deathMonth && Number(deathYear) ? new Date(Number(deathYear), Number(deathMonth), 0).getDate() : 31
 
   return (
     <form onSubmit={onSubmit} className="space-y-5">
@@ -321,6 +332,31 @@ export default function PersonForm() {
           <input type="checkbox" checked={deceased} onChange={(e) => setDeceased(e.target.checked)} className="h-4 w-4 accent-primary" />
           已過世
         </label>
+        {deceased && (
+          <div>
+            <label className="label">逝世日期(可只填年份)</label>
+            <div className="grid grid-cols-3 gap-2">
+              <input type="number" inputMode="numeric" min="1" max="9999" value={deathYear} onChange={(e) => setDeathYear(e.target.value)} placeholder="年" className="input" />
+              <select value={deathMonth} onChange={(e) => { setDeathMonth(e.target.value); if (!e.target.value) setDeathDay('') }} className="input" disabled={!deathYear}>
+                <option value="">月</option>
+                {Array.from({ length: 12 }, (_, i) => (
+                  <option key={i + 1} value={i + 1}>
+                    {i + 1} 月
+                  </option>
+                ))}
+              </select>
+              <select value={deathDay} onChange={(e) => setDeathDay(e.target.value)} className="input" disabled={!deathMonth}>
+                <option value="">日</option>
+                {Array.from({ length: deathDaysInMonth }, (_, i) => (
+                  <option key={i + 1} value={i + 1}>
+                    {i + 1} 日
+                  </option>
+                ))}
+              </select>
+            </div>
+            <p className="mt-1 text-xs text-muted">有生日與逝世日期就會顯示「享壽 N 歲」,壽命也會算進戰力(活很久很帥)。</p>
+          </div>
+        )}
         <div>
           <label className="label">描述 / 備註</label>
           <textarea value={note} onChange={(e) => setNote(e.target.value)} rows={4} className="input" placeholder="出生地、職業、故事、聯絡方式…" />

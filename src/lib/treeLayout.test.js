@@ -71,6 +71,19 @@ describe('treeLayout', () => {
     const gxs = [...positions.entries()].filter(([, p]) => p.y === positions.get(ids.gp).y).sort((a, b) => a[1].x - b[1].x).map(([id]) => id)
     expect(gxs).toEqual([ids.gp, ids.gm])
   })
+  it('兄弟姊妹相鄰、依長幼由左到右;父母置中在孩子上方', () => {
+    const row = [...positions.entries()].filter(([, p]) => p.y === positions.get(ids.me).y).sort((a, b) => a[1].x - b[1].x).map(([id]) => id)
+    const i = row.indexOf(ids.me)
+    expect(row.slice(i, i + 3)).toEqual([ids.me, ids.wife, ids.sis]) // 我 + 配偶是一個單位,妹妹緊接在後
+    expect(positions.get(ids.dad).x).toBeLessThan(positions.get(ids.unc).x) // 爸(1965)比叔(1968)年長,排左
+    const kidsCenter = (positions.get(ids.me).x + positions.get(ids.sis).x + NODE_W) / 2
+    const parentsCenter = (positions.get(ids.dad).x + positions.get(ids.mom).x + NODE_W) / 2
+    expect(Math.abs(kidsCenter - parentsCenter)).toBeLessThan(NODE_W)
+  })
+  it('視角本人在自己那一列是排版的圓心(x 座標為該列中央附近的固定點)', () => {
+    // 所有人平移後最左為 0,因此看「我」與孩子 / 父母的相對位置:孩子在正下方
+    expect(Math.abs(positions.get(ids.kid).x - (positions.get(ids.me).x + positions.get(ids.wife).x) / 2)).toBeLessThan(NODE_W)
+  })
   it('沒有視角時也能排版(以連通分量的相對世代)', () => {
     const { positions: pos } = layoutTree(graph, new Map(), null)
     for (const id of graph.persons.keys()) expect(pos.has(id)).toBe(true)
@@ -80,6 +93,49 @@ describe('treeLayout', () => {
   it('空圖不會出錯', () => {
     const r = layoutTree(buildGraph({}), new Map(), null)
     expect(r.positions.size).toBe(0)
+  })
+})
+
+describe('treeLayout:前任與姻親', () => {
+  const people = []
+  const parentChild = []
+  const spouses = []
+  let n = 0
+  const P = (name, gender, birth_date) => {
+    const id = `q${++n}`
+    people.push({ id, name, gender, birth_date })
+    return id
+  }
+  const dad = P('爸', 'male', '1965')
+  const mom = P('媽', 'female', '1967')
+  const ex = P('前妻', 'female', '1966')
+  const gp = P('爺', 'male', '1940')
+  const mgp = P('外公', 'male', '1941')
+  const mgm = P('外婆', 'female', '1943')
+  spouses.push({ person_a_id: dad, person_b_id: mom, status: 'married' }, { person_a_id: dad, person_b_id: ex, status: 'divorced' }, { person_a_id: mgp, person_b_id: mgm, status: 'married' })
+  parentChild.push({ parent_id: gp, child_id: dad }, { parent_id: mgp, child_id: mom }, { parent_id: mgm, child_id: mom })
+  const me = P('我', 'male', '1990')
+  const half = P('半血緣哥', 'male', '1988')
+  parentChild.push({ parent_id: dad, child_id: me }, { parent_id: mom, child_id: me }, { parent_id: dad, child_id: half }, { parent_id: ex, child_id: half })
+  const stranger = P('無關', 'male', '1990')
+  const graph = buildGraph({ people, parentChild, spouses })
+  const terms = computeAllRelationTerms(me, graph)
+  const { positions } = layoutTree(graph, terms, me)
+  const rowOf = (id) => [...positions.entries()].filter(([, p]) => p.y === positions.get(id).y).sort((a, b) => a[1].x - b[1].x).map(([x]) => x)
+
+  it('現任配偶黏在一起,前任排在旁邊、不插進中間', () => {
+    const row = rowOf(dad)
+    const i = row.indexOf(dad)
+    expect(row[i + 1]).toBe(mom)
+    expect(row[i - 1]).toBe(ex)
+  })
+  it('爸爸的父母排左、媽媽的父母排右(跟夫妻的左右一致)', () => {
+    expect(positions.get(gp).x).toBeLessThan(positions.get(mgp).x)
+    expect(rowOf(mgp)).toEqual([gp, mgp, mgm])
+  })
+  it('半血緣哥哥在爸爸與前妻下方、我在爸媽下方,不相連者排最下面', () => {
+    expect(positions.get(half).x).toBeLessThan(positions.get(me).x)
+    expect(positions.get(stranger).y).toBeGreaterThan(positions.get(me).y)
   })
 })
 
