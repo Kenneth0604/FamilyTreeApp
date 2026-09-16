@@ -14,7 +14,8 @@ function widthFor(kind, status) {
 /**
  * 血管造型的 React Flow edge(取代 BusEdge 與內建的 straight / step)
  * data: { kind: 'parent' | 'child' | 'direct' | 'spouse', status?: 配偶狀態, route?: 'target' | 'source' | 'step' | 'straight', label?: string, scale?: 寬度倍率,
- *         points?: { sx, sy, tx, ty } 明確指定兩端座標(放射排版:從卡片邊緣出發,不用 handle 的位置) }
+ *         points?: { sx, sy, tx, ty } 明確指定兩端座標(放射排版:從卡片邊緣出發,不用 handle 的位置),
+ *         poly?: [{x,y}...] 直接給整條中心線折點(不相鄰的配偶:從卡片頂端繞過整列) }
  *
  * 層次:
  * - vessel-body   封閉形狀填色(不透明,重疊的細管看起來是同一條)
@@ -36,13 +37,13 @@ export default function VesselEdge({ id, sourceX: hx, sourceY: hy, targetX: hxt,
   const targetY = data.points?.ty ?? hyt
   const scale = data.scale ?? 1 // 分層排版裡橫桿與別家錯開時整條畫細(0.6)
   const geo = useMemo(() => {
-    const pts = routePoints(sourceX, sourceY, targetX, targetY, route)
+    const pts = data.poly ?? routePoints(sourceX, sourceY, targetX, targetY, route)
     const base = widthFor(kind, status)
     const widthFn = scale === 1 ? base : (t, s, L) => base(t, s, L) * scale
     const outer = buildVesselPath(pts, widthFn)
     const core = ended ? null : buildVesselPath(pts, (t, s, L) => widthFn(t, s, L) * 0.5)
     return { ...outer, coreD: core?.d ?? '' }
-  }, [sourceX, sourceY, targetX, targetY, route, kind, status, ended, scale])
+  }, [sourceX, sourceY, targetX, targetY, route, kind, status, ended, scale, data.poly])
   if (!geo.d) return null
 
   const flowing = kind !== 'spouse'

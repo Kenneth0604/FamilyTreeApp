@@ -2,7 +2,7 @@ import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { ReactFlow, Background, Controls, Handle, Position, useReactFlow, ReactFlowProvider } from '@xyflow/react'
 import { useStore } from '../lib/store.jsx'
-import { layoutTree, layoutRadial, NODE_W, NODE_H } from '../lib/treeLayout.js'
+import { layoutTree, layoutRadial, NODE_W, NODE_H, GAP_Y } from '../lib/treeLayout.js'
 import Avatar from '../components/Avatar.jsx'
 import TermBadge from '../components/TermBadge.jsx'
 import VesselEdge from '../components/VesselEdge.jsx'
@@ -78,7 +78,17 @@ const HouseholdNode = memo(function HouseholdNode({ data }) {
   )
 })
 
-const nodeTypes = { person: PersonNode, junction: JunctionNode, household: HouseholdNode }
+/**
+ * 接點:配偶線兩端的小圓點,畫在卡片上方(節點層在連線之上),讓人一眼看出這條線是接到哪張卡;
+ * 不相鄰的配偶(前任、被別人隔開的)線會穿過別人,沒有接點會看起來像連錯人
+ */
+const PORT_SIZE = 10
+const PORT_COLOR = { married: 'var(--t-vessel)', widowed: 'var(--t-vessel)', partner: 'var(--t-vessel-partner)', divorced: 'var(--t-vessel-ended-line)', ex_partner: 'var(--t-vessel-ended-line)' }
+const PortNode = memo(function PortNode({ data }) {
+  return <div className="rounded-full ring-2 ring-surface" style={{ width: PORT_SIZE, height: PORT_SIZE, background: PORT_COLOR[data.status] || PORT_COLOR.married }} />
+})
+
+const nodeTypes = { person: PersonNode, junction: JunctionNode, household: HouseholdNode, port: PortNode }
 const edgeTypes = { vessel: VesselEdge }
 const HOUSEHOLD_PAD = 9 // 比夫妻卡片間距(12)的一半大一點、但小於間距,框線才不會壓到隔壁非成員的卡片
 const HOUSEHOLD_LABEL_H = 18
@@ -238,8 +248,8 @@ function TreeCanvas() {
       const px = parentPos.reduce((s, p) => s + p.x, 0) / parentPos.length + NODE_W / 2
       const parentBottom = Math.max(...parentPos.map((p) => p.y)) + NODE_H
       const childTop = Math.min(...childPos.map((p) => p.y))
-      // 孩子被搬到父母上方時,連接點仍放在父母下方一點,線才不會反折
-      const y = childTop > parentBottom ? parentBottom + (childTop - parentBottom) / 2 : parentBottom + 24
+      // 連接點放在列間空隙偏上(0.45)的位置,靠近下一列頂端的那一段留給配偶繞行線;孩子被搬到父母上方時放父母下方一點,線才不會反折
+      const y = childTop > parentBottom ? parentBottom + (childTop - parentBottom) * 0.45 : parentBottom + 24
       const xs = [...parentPos, ...childPos].map((p) => p.x + NODE_W / 2)
       out.set(key, { id: `junction-${key}`, x: px, y, parentIds: g.parentIds, childIds: g.childIds, zone: Math.round(parentBottom), gap: Math.max(0, childTop - parentBottom), minX: Math.min(...xs), maxX: Math.max(...xs), thin: false })
     }
@@ -261,8 +271,8 @@ function TreeCanvas() {
         j.lane = lane
       }
       if (lanes.length <= 1) continue
-      const gap = Math.min(...list.map((j) => j.gap)) || 90
-      const step = Math.min(16, (gap - 36) / (lanes.length - 1))
+      const gap = Math.min(...list.map((j) => j.gap)) || GAP_Y
+      const step = Math.max(4, Math.min(12, (gap * 0.45 - 20) / (lanes.length - 1)))
       for (const j of list) {
         j.y += (j.lane - (lanes.length - 1) / 2) * step
         j.thin = j.overlaps
@@ -353,7 +363,7 @@ function TreeCanvas() {
               // 親子:a 下緣 → 中間高度 → 橫移到 b 的正上方 → b 上緣(只在 b 就在下一列時畫,搬遠了就不畫;放射排版沒有列,不畫走廊)
               const gapTop = a.y + a.h
               const gapBottom = b.y
-              if (gapBottom - gapTop < 12 || gapBottom - gapTop > (NODE_H + 90) * 1.2) continue
+              if (gapBottom - gapTop < 12 || gapBottom - gapTop > (NODE_H + GAP_Y) * 1.2) continue
               const midY = (gapTop + gapBottom) / 2
               rects.push({ x: ax - CORRIDOR_W / 2, y: gapTop - 1, w: CORRIDOR_W, h: midY - gapTop + CORRIDOR_W / 2 + 1 })
               rects.push({ x: Math.min(ax, bx) - CORRIDOR_W / 2, y: midY - CORRIDOR_W / 2, w: Math.abs(ax - bx) + CORRIDOR_W, h: CORRIDOR_W })
@@ -387,6 +397,118 @@ function TreeCanvas() {
       .filter(Boolean)
   }, [households, cards, graph, radial])
 
+  // 連線與接點一起算:接點的位置由連線決定
+  const { edges, ports } = useMemo(() => {
+    const out = []
+    const ports = [] // { id, x, y, status }
+    const port = (id, x, y, status) => ports.push({ id, x, y, status })
+    if (radial) {
+      // 放射:父母 → 孩子直接連(兩端寬、中段細),配偶之間一小段;都從卡片邊緣出發、直線
+      const boxOf = new Map(cards.map((c) => [c.p.id, c]))
+      const points = (a, b) => {
+        const ca = { x: a.x + a.w / 2, y: a.y + a.h / 2 }
+        const cb = { x: b.x + b.w / 2, y: b.y + b.h / 2 }
+        const s = rectEdgePoint(a, cb)
+        const t = rectEdgePoint(b, ca)
+        return { sx: s.x, sy: s.y, tx: t.x, ty: t.y }
+      }
+      // 配偶線(不並排時)固定從卡片頂端 / 底端的正中央出發,不走跟配偶相鄰的那一側,才不會像是接到隔壁那張卡
+      const spousePoints = (a, b) => {
+        const ca = { x: a.x + a.w / 2, y: a.y + a.h / 2 }
+        const cb = { x: b.x + b.w / 2, y: b.y + b.h / 2 }
+        if (Math.abs(ca.y - cb.y) < NODE_H / 2) return points(a, b) // 並排:兩張卡之間
+        const down = cb.y > ca.y
+        return { sx: ca.x, sy: down ? a.y + a.h : a.y, tx: cb.x, ty: down ? b.y : b.y + b.h }
+      }
+      for (const r of parentChild) {
+        const a = boxOf.get(r.parent_id)
+        const b = boxOf.get(r.child_id)
+        if (!a || !b) continue
+        out.push({ id: `pc-${r.parent_id}-${r.child_id}`, source: r.parent_id, target: r.child_id, sourceHandle: 'bottom', targetHandle: 'top', type: 'vessel', data: { kind: 'direct', route: 'straight', points: points(a, b) } })
+      }
+      for (const s of spouses) {
+        const a = boxOf.get(s.person_a_id)
+        const b = boxOf.get(s.person_b_id)
+        if (!a || !b) continue
+        const pts = spousePoints(a, b)
+        const status = s.status || 'married'
+        out.push({ id: `sp-${s.id}`, source: s.person_a_id, target: s.person_b_id, sourceHandle: 'bottom', targetHandle: 'top', type: 'vessel', data: { kind: 'spouse', status, route: 'straight', label: SPOUSE_LABEL[s.status], points: pts } })
+        if (Math.hypot(pts.tx - pts.sx, pts.ty - pts.sy) > 40) {
+          // 不是並排的一對(前任、被隔開的):兩端加接點
+          port(`port-${s.id}-a`, pts.sx, pts.sy, status)
+          port(`port-${s.id}-b`, pts.tx, pts.ty, status)
+        }
+      }
+      return { edges: out, ports }
+    }
+    for (const j of junctions.values()) {
+      const scale = j.thin ? 0.6 : 1 // 橫桿跟別家重疊錯開時畫細一點,才分得出哪條是哪家的
+      for (const pid of j.parentIds) out.push({ id: `pc-in-${j.id}-${pid}`, source: pid, target: j.id, sourceHandle: 'bottom', targetHandle: 'top', type: 'vessel', data: { kind: 'parent', scale } })
+      for (const cid of j.childIds) out.push({ id: `pc-out-${j.id}-${cid}`, source: j.id, target: cid, sourceHandle: 'bottom', targetHandle: 'top', type: 'vessel', data: { kind: 'child', scale } })
+    }
+    // 配偶線:並排的一對 → 兩張卡之間一小段;被別人隔開的(前任、合併樹)→ 從兩張卡的頂端往上繞過整列再下來,
+    // 兩端加接點,不會看起來像連到中間那些人
+    const boxOf = new Map(cards.map((c) => [c.p.id, c]))
+    const arcs = [] // 同一列的繞行線,依橫向範圍分車道錯開高度
+    for (const s of spouses) {
+      const a = boxOf.get(s.person_a_id)
+      const b = boxOf.get(s.person_b_id)
+      if (!a || !b) continue
+      const [L, R] = a.x <= b.x ? [a, b] : [b, a]
+      const status = s.status || 'married'
+      const sameRow = Math.abs(L.y - R.y) < NODE_H / 2
+      const blocked = sameRow && cards.some((c) => c !== L && c !== R && Math.abs(c.y - L.y) < NODE_H / 2 && c.x < R.x && c.x + c.w > L.x + L.w)
+      const base = { id: `sp-${s.id}`, source: L.p.id, target: R.p.id, type: 'vessel' }
+      const data = { kind: 'spouse', status, label: SPOUSE_LABEL[s.status] }
+      if (sameRow && !blocked) {
+        out.push({ ...base, sourceHandle: 'right', targetHandle: 'left', data: { ...data, route: 'straight' } })
+      } else if (sameRow) {
+        arcs.push({ s, L, R, status, base, data, minX: L.x + L.w / 2, maxX: R.x + R.w / 2, row: Math.round(L.y) })
+      } else {
+        // 不同列(手動搬過):從上面那張的底部到下面那張的頂端,階梯狀;兩端加接點
+        const [T, B] = L.y <= R.y ? [L, R] : [R, L]
+        const sx = T.x + T.w / 2
+        const sy = T.y + T.h
+        const tx = B.x + B.w / 2
+        const ty = B.y
+        out.push({ ...base, source: T.p.id, target: B.p.id, sourceHandle: 'bottom', targetHandle: 'top', data: { ...data, route: 'step', points: { sx, sy, tx, ty } } })
+        port(`port-${s.id}-a`, sx, sy, status)
+        port(`port-${s.id}-b`, tx, ty, status)
+      }
+    }
+    // 繞行線分車道:同列、橫向範圍重疊的錯開不同高度(越外圈越高)
+    const byRow = new Map()
+    for (const arc of arcs) {
+      if (!byRow.has(arc.row)) byRow.set(arc.row, [])
+      byRow.get(arc.row).push(arc)
+    }
+    const portShift = new Map() // 同一張卡有多條繞行線時,接點左右錯開
+    for (const list of byRow.values()) {
+      list.sort((x, y) => x.maxX - x.minX - (y.maxX - y.minX)) // 短的先(內圈)
+      const lanes = []
+      for (const arc of list) {
+        let lane = lanes.findIndex((segs) => segs.every(([m0, m1]) => arc.maxX < m0 - 6 || arc.minX > m1 + 6))
+        if (lane < 0) lane = lanes.push([]) - 1
+        lanes[lane].push([arc.minX, arc.maxX])
+        const lift = 18 + lane * 12
+        const shiftOf = (id) => {
+          const n = portShift.get(id) || 0
+          portShift.set(id, n + 1)
+          return n === 0 ? 0 : (n % 2 ? 1 : -1) * Math.ceil(n / 2) * 14
+        }
+        const sx = arc.L.x + arc.L.w / 2 + shiftOf(arc.L.p.id)
+        const tx = arc.R.x + arc.R.w / 2 + shiftOf(arc.R.p.id)
+        const sy = arc.L.y
+        const ty = arc.R.y
+        const top = Math.min(sy, ty) - lift
+        out.push({ ...arc.base, sourceHandle: 'bottom', targetHandle: 'top', data: { ...arc.data, route: 'straight', poly: [{ x: sx, y: sy }, { x: sx, y: top }, { x: tx, y: top }, { x: tx, y: ty }] } })
+        port(`port-${arc.s.id}-a`, sx, sy, arc.status)
+        port(`port-${arc.s.id}-b`, tx, ty, arc.status)
+      }
+    }
+    return { edges: out, ports }
+  }, [radial, cards, parentChild, junctions, spouses, positions])
+
   const nodes = useMemo(
     () => [
       ...householdNodes,
@@ -411,60 +533,19 @@ function TreeCanvas() {
         draggable: false,
         selectable: false,
       })),
+      ...ports.map((p) => ({
+        id: p.id,
+        type: 'port',
+        position: { x: p.x - PORT_SIZE / 2, y: p.y - PORT_SIZE / 2 },
+        data: { status: p.status },
+        zIndex: 5, // 蓋在卡片邊緣上
+        draggable: false,
+        selectable: false,
+        focusable: false,
+      })),
     ],
-    [cards, householdNodes, terms, viewpointId, selfId, junctions, draggingId, layoutMode, selectedId],
+    [cards, householdNodes, terms, viewpointId, selfId, junctions, ports, draggingId, layoutMode, selectedId],
   )
-
-  const edges = useMemo(() => {
-    const out = []
-    if (radial) {
-      // 放射:父母 → 孩子直接連(兩端寬、中段細),配偶之間一小段;都從卡片邊緣出發、直線
-      const boxOf = new Map(cards.map((c) => [c.p.id, c]))
-      const points = (a, b) => {
-        const ca = { x: a.x + a.w / 2, y: a.y + a.h / 2 }
-        const cb = { x: b.x + b.w / 2, y: b.y + b.h / 2 }
-        const s = rectEdgePoint(a, cb)
-        const t = rectEdgePoint(b, ca)
-        return { sx: s.x, sy: s.y, tx: t.x, ty: t.y }
-      }
-      for (const r of parentChild) {
-        const a = boxOf.get(r.parent_id)
-        const b = boxOf.get(r.child_id)
-        if (!a || !b) continue
-        out.push({ id: `pc-${r.parent_id}-${r.child_id}`, source: r.parent_id, target: r.child_id, sourceHandle: 'bottom', targetHandle: 'top', type: 'vessel', data: { kind: 'direct', route: 'straight', points: points(a, b) } })
-      }
-      for (const s of spouses) {
-        const a = boxOf.get(s.person_a_id)
-        const b = boxOf.get(s.person_b_id)
-        if (!a || !b) continue
-        out.push({ id: `sp-${s.id}`, source: s.person_a_id, target: s.person_b_id, sourceHandle: 'bottom', targetHandle: 'top', type: 'vessel', data: { kind: 'spouse', status: s.status || 'married', route: 'straight', label: SPOUSE_LABEL[s.status], points: points(a, b) } })
-      }
-      return out
-    }
-    for (const j of junctions.values()) {
-      const scale = j.thin ? 0.6 : 1 // 橫桿跟別家重疊錯開時畫細一點,才分得出哪條是哪家的
-      for (const pid of j.parentIds) out.push({ id: `pc-in-${j.id}-${pid}`, source: pid, target: j.id, sourceHandle: 'bottom', targetHandle: 'top', type: 'vessel', data: { kind: 'parent', scale } })
-      for (const cid of j.childIds) out.push({ id: `pc-out-${j.id}-${cid}`, source: j.id, target: cid, sourceHandle: 'bottom', targetHandle: 'top', type: 'vessel', data: { kind: 'child', scale } })
-    }
-    for (const s of spouses) {
-      if (!peopleById.has(s.person_a_id) || !peopleById.has(s.person_b_id)) continue
-      const pa = positions.get(s.person_a_id)
-      const pb = positions.get(s.person_b_id)
-      if (!pa || !pb) continue
-      const [left, right] = pa.x <= pb.x ? [s.person_a_id, s.person_b_id] : [s.person_b_id, s.person_a_id]
-      const sameRow = Math.abs(pa.y - pb.y) < NODE_H / 2
-      out.push({
-        id: `sp-${s.id}`,
-        source: left,
-        target: right,
-        sourceHandle: sameRow ? 'right' : 'bottom',
-        targetHandle: sameRow ? 'left' : 'top',
-        type: 'vessel',
-        data: { kind: 'spouse', status: s.status || 'married', route: sameRow ? 'straight' : 'step', label: SPOUSE_LABEL[s.status] },
-      })
-    }
-    return out
-  }, [radial, cards, parentChild, junctions, spouses, peopleById, positions])
 
   // 點卡片:平常跳出這個人的快速選單(看詳細 / 以這個人為基準新增父母、子女、配偶、兄弟姊妹);編輯排版時是選取
   const [menuId, setMenuId] = useState(null)

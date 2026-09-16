@@ -18,7 +18,8 @@ import { isActiveSpouse } from './kinship/graph.js'
 export const NODE_W = 132
 export const NODE_H = 182
 const GAP_X = 28
-const GAP_Y = 90
+/** 列與列的間距:中段給父母 → 孩子的連接點橫桿(可分車道),靠近下一列卡片頂端的那一段留給不相鄰配偶的繞行線 */
+export const GAP_Y = 120
 const COUPLE_GAP = 12
 const ORDER_SWEEPS = 6
 const COORD_SWEEPS = 3

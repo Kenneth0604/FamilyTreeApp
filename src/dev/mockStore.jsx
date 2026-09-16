@@ -42,6 +42,8 @@ const spouses = [
   { id: 's5', person_a_id: 'uncle', person_b_id: 'aunt_in_law', status: 'married' },
   { id: 's6', person_a_id: 'mgp', person_b_id: 'mgm', status: 'married' },
   { id: 's7', person_a_id: 'aunt_husband', person_b_id: 'aunt', status: 'married' },
+  // 被別人隔開的前任(兩邊都有父母,不會黏在一起):測繞行線與接點
+  { id: 's8', person_a_id: 'uncle', person_b_id: 'aunt', status: 'divorced' },
 ]
 
 export function useStore() {
