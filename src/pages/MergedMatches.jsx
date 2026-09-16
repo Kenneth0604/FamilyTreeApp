@@ -23,8 +23,11 @@ export default function MergedMatches() {
   const sourceName = (fid) => sources.find((s) => s.id === fid)?.name ?? '另一個家族'
   const sameLinks = useMemo(() => mergeLinks.filter((l) => l.relation === 'same_person'), [mergeLinks])
   const notSameLinks = useMemo(() => mergeLinks.filter((l) => l.relation === 'not_same_person'), [mergeLinks])
-  const sideA = useMemo(() => people.filter((p) => p.family_id === sources[0]?.id).map((p) => p.id), [people, sources])
-  const sideB = useMemo(() => people.filter((p) => p.family_id === sources[1]?.id).map((p) => p.id), [people, sources])
+  // 手動指定:第二位只能選「跟第一位不同來源家族」的人
+  const sameFamilyAsA = useMemo(() => {
+    const fa = manualA ? peopleById.get(manualA)?.family_id : null
+    return fa ? people.filter((p) => p.family_id === fa).map((p) => p.id) : []
+  }, [manualA, people, peopleById])
 
   async function guard(fn, ok) {
     setBusy(true)
@@ -60,7 +63,7 @@ export default function MergedMatches() {
         </Link>
       </div>
       <p className="text-xs text-muted">
-        「{sources.map((s) => s.name).join('」與「')}」兩邊如果有同一個人(例如都建了阿公),確認後合併樹會把他們併成一個節點,兩家的親戚就會接在一起。只影響這棵合併樹,原本兩個家族的資料不會改變。
+        「{sources.map((s) => s.name).join('」「')}」之間如果有同一個人(例如都建了阿公),確認後合併樹會把他們併成一個節點,各家的親戚就會接在一起。只影響這棵合併樹,原本家族的資料不會改變。
         {!canManageMerge && ' 你目前只能查看,確認需要任一來源家族的可編輯成員。'}
       </p>
 
@@ -127,7 +130,7 @@ export default function MergedMatches() {
                   <Avatar person={a} size="sm" />
                   <span className="min-w-0 flex-1 truncate text-ink">
                     {a?.name ?? '(已刪除)'}
-                    <span className="text-xs text-muted"> = {sourceName(sources[1]?.id)}的「{a?.aliases?.find((x) => x.id === l.person_b_id)?.name ?? '(已刪除)'}」</span>
+                    <span className="text-xs text-muted"> = {sourceName(peopleById.get(l.person_b_id)?.family_id ?? a?.aliases?.find((x) => x.id === l.person_b_id)?.family_id)}的「{a?.aliases?.find((x) => x.id === l.person_b_id)?.name ?? nameOf(l.person_b_id)}」</span>
                   </span>
                   {canManageMerge && (
                     <button onClick={() => guard(() => unlinkSamePerson(l.id), '已取消')} className="text-xs text-muted hover:text-danger" disabled={busy}>
@@ -161,18 +164,18 @@ export default function MergedMatches() {
         </section>
       )}
 
-      {canManageMerge && sources.length === 2 && (
+      {canManageMerge && sources.length >= 2 && (
         <section>
           <h2 className="section-title">手動指定</h2>
           <div className="card space-y-3 p-4">
-            <p className="text-xs text-muted">名字寫法不同(例如「王阿嬤」跟「王秀英」)自動比對不到時,從兩邊各選一人。</p>
+            <p className="text-xs text-muted">名字寫法不同(例如「王阿嬤」跟「王秀英」)自動比對不到時,從兩個不同的來源家族各選一人。</p>
             <div>
-              <label className="label">{sources[0].name} 的人</label>
-              <PersonPicker value={manualA} onChange={setManualA} exclude={sideB} compact />
+              <label className="label">第一位</label>
+              <PersonPicker value={manualA} onChange={(id) => { setManualA(id); setManualB(null) }} compact />
             </div>
             <div>
-              <label className="label">{sources[1].name} 的人</label>
-              <PersonPicker value={manualB} onChange={setManualB} exclude={sideA} compact />
+              <label className="label">第二位{manualA ? `(${sourceName(peopleById.get(manualA)?.family_id)}以外的家族)` : ''}</label>
+              <PersonPicker value={manualB} onChange={setManualB} exclude={sameFamilyAsA} compact />
             </div>
             <button
               onClick={() =>

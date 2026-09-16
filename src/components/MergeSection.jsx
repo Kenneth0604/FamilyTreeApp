@@ -12,8 +12,14 @@ import { LINK_RELATIONS, linkDescription } from '../lib/merge.js'
  * - 合併家族:顯示來源、切回來源、解除合併
  */
 export default function MergeSection() {
-  const { isMerged } = useStore()
-  return isMerged ? <MergedInfo /> : <MergeTools />
+  const { isMerged, canManageMerge } = useStore()
+  if (!isMerged) return <MergeTools />
+  return (
+    <>
+      <MergedInfo />
+      {canManageMerge && <MergeTools />}
+    </>
+  )
 }
 
 function MergedInfo() {
@@ -26,7 +32,7 @@ function MergedInfo() {
   const canRemove = sources.some((s) => mine(s.id) && mine(s.id).role !== 'viewer')
 
   async function onRemove() {
-    if (!window.confirm(`確定要解除合併「${family?.name}」?\n\n只會刪除這個合併家族樹,${sources.map((s) => s.name).join(' 與 ')} 兩個原本家族的資料完全不受影響,之後可以再重新合併。`)) return
+    if (!window.confirm(`確定要解除合併「${family?.name}」?\n\n只會刪除這個合併家族樹,${sources.map((s) => s.name).join('、')} 這 ${sources.length} 個原本家族的資料完全不受影響,之後可以再重新合併。`)) return
     setBusy(true)
     try {
       await removeMerge()
@@ -43,7 +49,8 @@ function MergedInfo() {
       <h2 className="section-title">合併家族樹</h2>
       <div className="card space-y-3 p-4">
         <p className="text-sm text-ink">
-          這是由 <span className="font-semibold">{sources.map((s) => s.name).join(' + ')}</span> 合併而成的唯讀家族樹。兩邊的成員都看得到,但不能在這裡編輯;在原本的家族裡修改後,這裡會自動更新。
+          這是由 <span className="font-semibold">{sources.map((s) => s.name).join(' + ')}</span> 合併而成的唯讀家族樹。各家的成員都看得到,但不能在這裡編輯;在原本的家族裡修改後,這裡會自動更新。
+          {canRemove && ' 你也可以在下方用連結碼把更多家族加進來。'}
         </p>
         <div className="grid grid-cols-2 gap-2">
           {sources.map((s) => (
@@ -66,12 +73,16 @@ function MergedInfo() {
 }
 
 function MergeTools() {
-  const { canEdit } = useStore()
-  if (!canEdit) return null
+  const { canEdit, isMerged, canManageMerge } = useStore()
+  if (!(isMerged ? canManageMerge : canEdit)) return null
   return (
     <section>
-      <h2 className="section-title">合併家族樹</h2>
-      <p className="mb-2 text-xs text-muted">跟另一個家族各出一個人、指定他們的關係,就會產生一棵兩邊都能看、但只能回各自家族編輯的合併家族樹。</p>
+      <h2 className="section-title">{isMerged ? '再合併更多家族' : '合併家族樹'}</h2>
+      <p className="mb-2 text-xs text-muted">
+        {isMerged
+          ? '這棵合併樹可以繼續跟別的家族合併:產生連結碼給對方,或輸入對方的連結碼。對方是一般家族就直接加進來;對方也是合併樹的話,會把他們所有的來源家族一起併進這棵。'
+          : '跟另一個家族各出一個人、指定他們的關係,就會產生一棵兩邊都能看、但只能回各自家族編輯的合併家族樹。'}
+      </p>
       <div className="space-y-3">
         <CreateCode />
         <MergeByCode />
@@ -228,7 +239,7 @@ function CreateCode() {
 }
 
 function MergeByCode() {
-  const { family, peekLinkCode, mergeWithCode } = useStore()
+  const { family, isMerged, peekLinkCode, mergeWithCode } = useStore()
   const toast = useToast()
   const [code, setCode] = useState('')
   const [peek, setPeek] = useState(null)
@@ -249,11 +260,14 @@ function MergeByCode() {
 
   async function onMerge() {
     if (!personId) return toast.error('請選一位本家族的成員')
-    if (!window.confirm(`確定要合併?\n\n${linkDescription(peek)}。\n會建立一棵新的合併家族樹,兩邊所有成員都看得到但不能在裡面編輯;原本兩個家族不受影響,之後也可以解除合併。`)) return
+    const note = isMerged
+      ? '會把對方加進這棵合併樹(對方也是合併樹的話,他們所有來源家族一起加進來、他們那棵會被刪掉);所有成員都看得到但不能在裡面編輯,原本各家族不受影響。'
+      : '會建立一棵新的合併家族樹(對方若已是合併樹,則是把你的家族加進去),所有成員都看得到但不能在裡面編輯;原本的家族不受影響,之後也可以解除合併。'
+    if (!window.confirm(`確定要合併?\n\n${linkDescription(peek)}。\n${note}`)) return
     setBusy(true)
     try {
       await mergeWithCode(code, personId, name.trim())
-      toast.success('已建立合併家族樹')
+      toast.success(isMerged ? '已加進這棵合併樹' : '已合併')
     } catch (e) {
       toast.error(e.message)
     } finally {
@@ -291,8 +305,8 @@ function MergeByCode() {
             <PersonPicker value={personId} onChange={setPersonId} compact />
           </div>
           <div>
-            <label className="label">合併後的家族名稱(可不填)</label>
-            <input value={name} onChange={(e) => setName(e.target.value)} className="input" placeholder={`${peek.family_name} × ${family?.name}`} />
+            <label className="label">合併後的家族名稱(可不填{isMerged ? ',不填就維持現在的名稱' : ''})</label>
+            <input value={name} onChange={(e) => setName(e.target.value)} className="input" placeholder={isMerged ? family?.name : `${peek.family_name} × ${family?.name}`} />
           </div>
           <button onClick={onMerge} className="btn-primary w-full" disabled={busy || !personId}>
             {busy ? '合併中…' : '合併家族樹'}

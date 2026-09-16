@@ -371,14 +371,17 @@ grant execute on function public.regenerate_view_code(uuid) to authenticated;
 -- 合併樹底下沒有任何 people / parent_child / spouses 資料列:讀取時由 get_merged_tree 把兩個來源家族的資料
 -- 加上橋接關係一次拼好回傳;兩邊所有成員都是合併樹的 viewer(唯讀),要編輯回原本的家族。
 -- 解除合併只刪掉合併樹這一列(cascade 清掉 family_merge_sources / family_links / 它的 family_members),
--- 兩個來源家族完全不受影響。v1 不支援合併樹再被合併(巢狀)。
--- 刻意不動 is_family_member / is_family_editor 與既有 RLS:跨家族讀取全部收斂在 get_merged_tree 這一個 security definer 函式。
+-- 來源家族完全不受影響。
+-- 合併樹可以再合併:合併樹 ⊕ 一般家族 → 把該家族加進這棵合併樹的來源;合併樹 ⊕ 合併樹 → 把對方的來源與橋接
+-- 全部併進「輸入碼的那一棵」,對方那棵刪掉。所以合併樹永遠是「扁平的多來源」,沒有巢狀。
+-- 刻意不動 is_family_member / is_family_editor 與既有 RLS:跨家族讀取全部收斂在 get_merged_tree 這一個 security definer 函式;
+-- 合併樹的「可管理」(產生連結碼、再合併、確認同一人、解除)= 任一來源家族的 editor,見 can_manage_family。
 -- ============================================================================
 alter table public.families add column if not exists kind text not null default 'normal';
 alter table public.families drop constraint if exists families_kind_check;
 alter table public.families add constraint families_kind_check check (kind in ('normal', 'merged'));
 
--- 一個合併家族由哪些來源家族組成(v1 固定兩個,結構保留多家族擴充空間)
+-- 一個合併家族由哪些來源家族組成(兩個以上;再合併就是往這裡加來源)
 create table if not exists public.family_merge_sources (
   merged_family_id  uuid not null references public.families(id) on delete cascade,
   source_family_id  uuid not null references public.families(id) on delete cascade,
@@ -419,6 +422,28 @@ create table if not exists public.family_link_invites (
 );
 create index if not exists family_link_invites_family_idx on public.family_link_invites(family_id);
 
+-- 誰能管理一個家族的合併事務:一般家族 = 它的 editor;合併樹 = 任一來源家族的 editor(合併樹本身的成員都只是 viewer)
+create or replace function public.can_manage_family(p_family_id uuid)
+returns boolean language sql stable security definer set search_path = public as $$
+  select case
+    when (select kind from public.families where id = p_family_id) = 'merged'
+      then exists (select 1 from public.family_merge_sources s where s.merged_family_id = p_family_id and public.is_family_editor(s.source_family_id))
+    else public.is_family_editor(p_family_id)
+  end
+$$;
+grant execute on function public.can_manage_family(uuid) to authenticated;
+
+-- 一個家族實際涵蓋的資料來源:一般家族是自己;合併樹是它登記的來源家族
+create or replace function public.family_source_ids(p_family_id uuid)
+returns uuid[] language sql stable security definer set search_path = public as $$
+  select case
+    when (select kind from public.families where id = p_family_id) = 'merged'
+      then coalesce((select array_agg(source_family_id) from public.family_merge_sources where merged_family_id = p_family_id), '{}'::uuid[])
+    else array[p_family_id]
+  end
+$$;
+grant execute on function public.family_source_ids(uuid) to authenticated;
+
 -- 連結碼不能跟任何邀請碼或其他連結碼撞號
 create or replace function public.gen_unique_link_code()
 returns text language plpgsql volatile security definer set search_path = public as $$
@@ -441,9 +466,9 @@ declare
   mid      uuid;
 begin
   if auth.uid() is null then raise exception '請先登入'; end if;
-  if not public.is_family_editor(p_family_id) then raise exception '只有可編輯的成員才能產生連結碼'; end if;
-  if (select kind from public.families where id = p_family_id) <> 'normal' then raise exception '合併家族樹不能再產生連結碼'; end if;
-  if not exists (select 1 from public.people where id = p_person_id and family_id = p_family_id) then raise exception '這個人不在你的家族裡'; end if;
+  if not public.can_manage_family(p_family_id) then raise exception '只有可編輯的成員才能產生連結碼'; end if;
+  -- 合併樹也能產生:人可以是任一來源家族的人
+  if not exists (select 1 from public.people where id = p_person_id and family_id = any(public.family_source_ids(p_family_id))) then raise exception '這個人不在你的家族裡'; end if;
   if p_relation not in ('spouse', 'parent_child') then raise exception '關係類型錯誤'; end if;
   if p_relation = 'spouse' and coalesce(p_status, '') not in ('married', 'widowed', 'partner', 'divorced', 'ex_partner') then raise exception '請選擇配偶關係狀態'; end if;
   if p_relation = 'parent_child' and p_is_parent is null then raise exception '請指定這個人是父母還是小孩'; end if;
@@ -477,26 +502,39 @@ begin
 end $$;
 grant execute on function public.peek_family_link_code(text) to authenticated;
 
+-- 合併:
+--   一般 ⊕ 一般     → 建一棵新的合併樹(兩個來源)
+--   合併樹 ⊕ 一般   → 把一般家族加進合併樹的來源(不管哪一邊拿碼)
+--   合併樹 ⊕ 合併樹 → 把「產生碼那一棵」的來源與橋接全部併進「輸入碼這一棵」,再刪掉前者
+-- 回傳結果所在的合併樹 id(可能就是 p_family_id 本身)
 create or replace function public.merge_family_with_code(p_code text, p_family_id uuid, p_person_id uuid, p_merged_name text default null)
 returns uuid language plpgsql security definer set search_path = public as $$
 declare
   inv        public.family_link_invites%rowtype;
   other_name text;
   my_name    text;
-  mid        uuid;
+  a_kind     text;
+  b_kind     text;
+  a_src      uuid[];
+  b_src      uuid[];
+  target     uuid;
+  absorbed   uuid;
   my_member  uuid;
 begin
   if auth.uid() is null then raise exception '請先登入'; end if;
-  if not public.is_family_editor(p_family_id) then raise exception '只有可編輯的成員才能合併家族'; end if;
-  if (select kind from public.families where id = p_family_id) <> 'normal' then raise exception '合併家族樹不能再被合併'; end if;
-  if not exists (select 1 from public.people where id = p_person_id and family_id = p_family_id) then raise exception '這個人不在你的家族裡'; end if;
+  if not public.can_manage_family(p_family_id) then raise exception '只有可編輯的成員才能合併家族'; end if;
+  select kind into b_kind from public.families where id = p_family_id;
+  b_src := public.family_source_ids(p_family_id);
+  if not exists (select 1 from public.people where id = p_person_id and family_id = any(b_src)) then raise exception '這個人不在你的家族裡'; end if;
 
   select * into inv from public.family_link_invites where code = upper(trim(p_code)) and used_at is null;
   if inv.code is null then raise exception '找不到這個連結碼或已經被使用過'; end if;
   if inv.family_id = p_family_id then raise exception '不能跟自己的家族合併'; end if;
-  if (select kind from public.families where id = inv.family_id) <> 'normal' then raise exception '對方的家族樹不能被合併'; end if;
-  if not exists (select 1 from public.people where id = inv.person_id and family_id = inv.family_id) then raise exception '對方指定的人已不在他們的家族裡'; end if;
-  if exists (
+  select kind into a_kind from public.families where id = inv.family_id;
+  a_src := public.family_source_ids(inv.family_id);
+  if not exists (select 1 from public.people where id = inv.person_id and family_id = any(a_src)) then raise exception '對方指定的人已不在他們的家族裡'; end if;
+  if a_src && b_src then raise exception '這兩邊已經合併在一起了(有共同的來源家族)'; end if;
+  if a_kind = 'normal' and b_kind = 'normal' and exists (
     select 1 from public.family_merge_sources s1
     join public.family_merge_sources s2 on s2.merged_family_id = s1.merged_family_id
     where s1.source_family_id = inv.family_id and s2.source_family_id = p_family_id
@@ -504,26 +542,47 @@ begin
 
   select name into other_name from public.families where id = inv.family_id;
   select name into my_name from public.families where id = p_family_id;
-  insert into public.families (name, kind)
-    values (coalesce(nullif(trim(p_merged_name), ''), other_name || ' × ' || my_name), 'merged')
-    returning id into mid;
-  insert into public.family_merge_sources (merged_family_id, source_family_id) values (mid, inv.family_id), (mid, p_family_id);
+  if a_kind = 'normal' and b_kind = 'normal' then
+    insert into public.families (name, kind)
+      values (coalesce(nullif(trim(p_merged_name), ''), other_name || ' × ' || my_name), 'merged')
+      returning id into target;
+    insert into public.family_merge_sources (merged_family_id, source_family_id) values (target, inv.family_id), (target, p_family_id);
+  elsif b_kind = 'merged' then
+    -- 我這棵合併樹吃下對方(一般家族,或另一棵合併樹的所有來源)
+    target := p_family_id;
+    insert into public.family_merge_sources (merged_family_id, source_family_id) select target, unnest(a_src) on conflict do nothing;
+    if a_kind = 'merged' then absorbed := inv.family_id; end if;
+    if nullif(trim(p_merged_name), '') is not null then update public.families set name = trim(p_merged_name) where id = target; end if;
+  else
+    -- 對方是合併樹、我是一般家族:把我加進對方那棵
+    target := inv.family_id;
+    insert into public.family_merge_sources (merged_family_id, source_family_id) values (target, p_family_id) on conflict do nothing;
+    if nullif(trim(p_merged_name), '') is not null then update public.families set name = trim(p_merged_name) where id = target; end if;
+  end if;
+
+  -- 被吃掉的合併樹:橋接與同一人標記搬過來,然後整棵刪掉(它的成員會在下面重新加進 target)
+  if absorbed is not null then
+    insert into public.family_links (merged_family_id, person_a_id, person_b_id, relation, status, parent_side, created_by)
+      select target, l.person_a_id, l.person_b_id, l.relation, l.status, l.parent_side, null
+        from public.family_links l where l.merged_family_id = absorbed;
+    delete from public.families where id = absorbed;
+  end if;
 
   select id into my_member from public.family_members where family_id = p_family_id and auth_user_id = auth.uid();
   insert into public.family_links (merged_family_id, person_a_id, person_b_id, relation, status, parent_side, created_by)
-    values (mid, inv.person_id, p_person_id, inv.relation, inv.status,
+    values (target, inv.person_id, p_person_id, inv.relation, inv.status,
             case when inv.relation = 'parent_child' then (case when inv.is_parent then 'a' else 'b' end) end,
             my_member);
 
-  -- 兩邊目前所有成員都成為合併樹的 viewer(同時屬於兩家的人只會有一筆);viewpoint 留空讓他們在合併樹重選
+  -- 所有來源家族目前的成員都成為合併樹的 viewer(已在裡面的不動);viewpoint 留空讓他們在合併樹重選
   insert into public.family_members (family_id, auth_user_id, display_name, role, self_person_id)
-    select mid, m.auth_user_id, m.display_name, 'viewer', m.self_person_id
+    select target, m.auth_user_id, m.display_name, 'viewer', m.self_person_id
       from public.family_members m
-     where m.family_id in (inv.family_id, p_family_id)
+     where m.family_id = any(a_src || b_src)
     on conflict (family_id, auth_user_id) do nothing;
 
   update public.family_link_invites set used_at = now() where code = inv.code;
-  return mid;
+  return target;
 end $$;
 grant execute on function public.merge_family_with_code(text, uuid, uuid, text) to authenticated;
 
@@ -534,7 +593,7 @@ declare
 begin
   select family_id into fid from public.family_link_invites where code = upper(trim(p_code)) and used_at is null;
   if fid is null then raise exception '找不到這個連結碼或已經被使用過'; end if;
-  if not public.is_family_editor(fid) then raise exception '只有可編輯的成員才能撤銷連結碼'; end if;
+  if not public.can_manage_family(fid) then raise exception '只有可編輯的成員才能撤銷連結碼'; end if;
   update public.family_link_invites set used_at = now() where code = upper(trim(p_code));
 end $$;
 grant execute on function public.revoke_family_link_code(text) to authenticated;
@@ -550,8 +609,9 @@ begin
 end $$;
 grant execute on function public.remove_family_merge(uuid) to authenticated;
 
--- 標記兩個來源家族裡的兩個人是同一人(p_same = true)或確認不是(false,之後不再提示)。
--- 正規化成 person_a 屬於第一個來源、person_b 屬於第二個來源;前端讀取時把 b 併進 a。一個人只能被標記為一個人的同一人。
+-- 標記兩個(不同)來源家族裡的兩個人是同一人(p_same = true)或確認不是(false,之後不再提示)。
+-- 正規化成 person_a 屬於排序較前的來源、person_b 屬於較後的來源;前端讀取時把 b 併進 a(可以串接:c 併進 b、b 併進 a)。
+-- 一個人只能被併進一個人;也不能繞成圈。
 create or replace function public.link_same_person(p_merged_family_id uuid, p_person_a_id uuid, p_person_b_id uuid, p_same boolean)
 returns uuid language plpgsql security definer set search_path = public as $$
 declare
@@ -565,26 +625,33 @@ declare
 begin
   if auth.uid() is null then raise exception '請先登入'; end if;
   if (select kind from public.families where id = p_merged_family_id) is distinct from 'merged' then raise exception '這不是合併家族樹'; end if;
-  if not exists (select 1 from public.family_merge_sources s where s.merged_family_id = p_merged_family_id and public.is_family_editor(s.source_family_id))
-    then raise exception '只有來源家族的可編輯成員才能確認同一人'; end if;
+  if not public.can_manage_family(p_merged_family_id) then raise exception '只有來源家族的可編輯成員才能確認同一人'; end if;
   select array_agg(s.source_family_id order by f.created_at, f.id) into src
     from public.family_merge_sources s join public.families f on f.id = s.source_family_id
    where s.merged_family_id = p_merged_family_id;
   select family_id into fa from public.people where id = p_person_a_id;
   select family_id into fb from public.people where id = p_person_b_id;
   if fa is null or fb is null or fa = fb or not (fa = any(src)) or not (fb = any(src)) then
-    raise exception '兩個人必須分別來自這棵合併樹的兩個來源家族';
+    raise exception '兩個人必須分別來自這棵合併樹的不同來源家族';
   end if;
-  if fa = src[1] then a := p_person_a_id; b := p_person_b_id; else a := p_person_b_id; b := p_person_a_id; end if;
+  if array_position(src, fa) < array_position(src, fb) then a := p_person_a_id; b := p_person_b_id; else a := p_person_b_id; b := p_person_a_id; end if;
 
   delete from public.family_links
    where merged_family_id = p_merged_family_id and relation in ('same_person', 'not_same_person')
      and ((person_a_id = a and person_b_id = b) or (person_a_id = b and person_b_id = a));
-  if p_same and exists (
-    select 1 from public.family_links
-     where merged_family_id = p_merged_family_id and relation = 'same_person'
-       and (person_a_id in (a, b) or person_b_id in (a, b))
-  ) then raise exception '其中一人已經被標記為另一個人的同一人,請先取消那筆'; end if;
+  if p_same then
+    if exists (select 1 from public.family_links where merged_family_id = p_merged_family_id and relation = 'same_person' and person_b_id = b)
+      then raise exception '其中一人已經被併進另一個人,請先取消那筆'; end if;
+    -- 從 a 沿「被併進誰」一路走,不能走回 b,否則繞成一圈
+    if exists (
+      with recursive chain as (
+        select a as id
+        union
+        select l.person_a_id from public.family_links l join chain c on l.person_b_id = c.id
+         where l.merged_family_id = p_merged_family_id and l.relation = 'same_person'
+      ) select 1 from chain where id = b
+    ) then raise exception '這樣會繞成一圈(對方已經直接或間接被併進這個人)'; end if;
+  end if;
 
   select id into my_member from public.family_members where auth_user_id = auth.uid() and family_id = any(src) limit 1;
   insert into public.family_links (merged_family_id, person_a_id, person_b_id, relation, created_by)
@@ -602,13 +669,12 @@ begin
   if auth.uid() is null then raise exception '請先登入'; end if;
   select merged_family_id into mid from public.family_links where id = p_link_id and relation in ('same_person', 'not_same_person');
   if mid is null then raise exception '找不到這筆標記'; end if;
-  if not exists (select 1 from public.family_merge_sources s where s.merged_family_id = mid and public.is_family_editor(s.source_family_id))
-    then raise exception '只有來源家族的可編輯成員才能取消標記'; end if;
+  if not public.can_manage_family(mid) then raise exception '只有來源家族的可編輯成員才能取消標記'; end if;
   delete from public.family_links where id = p_link_id;
 end $$;
 grant execute on function public.unlink_same_person(uuid) to authenticated;
 
--- 合併樹的全部資料一次拼好:兩個來源家族的人物 / 關係 / 紀事 / 寵物 / 小家庭 + 橋接關係(含同一人標記)。
+-- 合併樹的全部資料一次拼好:所有來源家族的人物 / 關係 / 紀事 / 寵物 / 小家庭 + 橋接關係(含同一人標記)。
 -- 唯一的跨家族讀取入口;只回傳 family_merge_sources 裡登記的來源。
 create or replace function public.get_merged_tree(p_merged_family_id uuid)
 returns jsonb language plpgsql stable security definer set search_path = public as $$
@@ -659,7 +725,7 @@ create policy "family_links member select" on public.family_links for select to 
   using (public.is_family_member(merged_family_id));
 drop policy if exists "link_invites editor select" on public.family_link_invites;
 create policy "link_invites editor select" on public.family_link_invites for select to authenticated
-  using (public.is_family_editor(family_id));
+  using (public.can_manage_family(family_id)); -- 合併樹產生的連結碼:來源家族的 editor 看得到
 -- 以上三張表的寫入一律經由 RPC
 
 -- ----------------------------------------------------------------------------

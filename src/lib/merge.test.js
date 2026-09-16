@@ -52,6 +52,26 @@ describe('合併家族樹:同一人', () => {
     const g = buildGraph({ people: r.people, parentChild: r.parentChild, spouses: r.spouses })
     expect(computeRelationTerm('a2', 'b3', g)?.term).toMatch(/兄弟|哥哥|弟弟/)
   })
+  it('三個來源:每兩家之間都比對;同一人可以串接(c 併進 b、b 併進 a → 都指向 a)', () => {
+    const three = [...sources, { id: 'C', name: '王家' }]
+    const ppl = [...people, { id: 'c1', name: '林大明', gender: 'male', family_id: 'C', nicknames: ['明仔'] }]
+    const c = findSamePersonCandidates(ppl, three, [])
+    expect(c.map((x) => [x.a.id, x.b.id])).toEqual(expect.arrayContaining([['a1', 'b1'], ['a1', 'c1'], ['b1', 'c1']]))
+    // b1 已併進 a1 後,b1 不再比對,但 a1 仍會跟 c1 比
+    const after = findSamePersonCandidates(ppl, three, [{ relation: 'same_person', person_a_id: 'a1', person_b_id: 'b1' }])
+    expect(after.map((x) => [x.a.id, x.b.id])).toEqual(expect.arrayContaining([['a1', 'c1'], ['a2', 'b2']]))
+    expect(after.some((x) => x.a.id === 'b1' || x.b.id === 'b1')).toBe(false)
+    // 串接:c1 → b1 → a1
+    const r = resolveSamePerson(
+      { people: ppl, parentChild: [{ id: 'p', parent_id: 'c1', child_id: 'b3' }], spouses: [], entries: [], pets: [], households: [] },
+      [{ relation: 'same_person', person_a_id: 'a1', person_b_id: 'b1' }, { relation: 'same_person', person_a_id: 'b1', person_b_id: 'c1' }],
+    )
+    expect(r.people.map((p) => p.id)).toEqual(['a1', 'a2', 'b2', 'b3'])
+    const a1 = r.people.find((p) => p.id === 'a1')
+    expect(a1.aliases.map((x) => x.id).sort()).toEqual(['b1', 'c1'])
+    expect(a1.nicknames).toEqual(['阿明', '明仔'])
+    expect(r.parentChild[0]).toMatchObject({ parent_id: 'a1', child_id: 'b3' })
+  })
 })
 
 const link = (over) => ({ id: 'L1', merged_family_id: 'M', person_a_id: 'a', person_b_id: 'b', created_at: '2026-01-01T00:00:00Z', created_by: null, ...over })

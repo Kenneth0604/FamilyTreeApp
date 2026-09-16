@@ -23,13 +23,18 @@ export function resolveSamePerson(tree, links) {
   const same = (links || []).filter((l) => l.relation === 'same_person')
   if (!same.length) return tree
   const alias = new Map(same.map((l) => [l.person_b_id, l.person_a_id]))
-  const map = (id) => alias.get(id) ?? id
+  // 可以串接(三個以上的來源:c 併進 b、b 併進 a → 都指向 a);有防呆不會無限迴圈
+  const map = (id) => {
+    let cur = id
+    for (let i = 0; i < 32 && alias.has(cur); i++) cur = alias.get(cur)
+    return cur
+  }
   const byId = new Map((tree.people || []).map((p) => [p.id, p]))
 
   const people = (tree.people || [])
     .filter((p) => !alias.has(p.id))
     .map((p) => {
-      const others = same.filter((l) => l.person_a_id === p.id).map((l) => byId.get(l.person_b_id)).filter(Boolean)
+      const others = [...alias.keys()].filter((b) => map(b) === p.id).map((b) => byId.get(b)).filter(Boolean)
       if (!others.length) return p
       const m = { ...p, aliases: others.map((o) => ({ id: o.id, family_id: o.family_id, name: o.name })) }
       for (const o of others) {
@@ -64,25 +69,30 @@ export function resolveSamePerson(tree, links) {
 }
 
 /**
- * 找「可能是同一人」的配對:第一個來源 × 第二個來源,姓名相同或一方的姓名等於另一方的小名。
- * 已標記(同一人 / 不是同一人)的配對、已被併過的人不再列出。附上性別 / 出生年是否一致的提示,有衝突的排後面。
+ * 找「可能是同一人」的配對:每兩個不同來源家族之間,姓名相同或一方的姓名等於另一方的小名。
+ * 已標記(同一人 / 不是同一人)的配對、已被併進別人的人不再列出。附上性別 / 出生年是否一致的提示,有衝突的排後面。
  */
 export function findSamePersonCandidates(people, sources, links) {
   if (!sources || sources.length < 2) return []
-  const [s0, s1] = sources.map((s) => s.id)
   const decided = new Set()
-  const aliased = new Set()
+  const aliased = new Set() // 被併進別人的(b 那一方)不再比對;a 那一方仍可跟第三個家族的人比
   for (const l of links || []) {
     if (l.relation !== 'same_person' && l.relation !== 'not_same_person') continue
     decided.add(pairKey(l.person_a_id, l.person_b_id))
-    if (l.relation === 'same_person') {
-      aliased.add(l.person_a_id)
-      aliased.add(l.person_b_id)
+    if (l.relation === 'same_person') aliased.add(l.person_b_id)
+  }
+  const out = []
+  for (let i = 0; i < sources.length; i++) {
+    for (let j = i + 1; j < sources.length; j++) {
+      const A = (people || []).filter((p) => p.family_id === sources[i].id && !aliased.has(p.id))
+      const B = (people || []).filter((p) => p.family_id === sources[j].id && !aliased.has(p.id))
+      collect(A, B, decided, out)
     }
   }
-  const A = (people || []).filter((p) => p.family_id === s0 && !aliased.has(p.id))
-  const B = (people || []).filter((p) => p.family_id === s1 && !aliased.has(p.id))
-  const out = []
+  return out.sort((x, y) => Number(x.conflict) - Number(y.conflict))
+}
+
+function collect(A, B, decided, out) {
   for (const a of A) {
     const na = normName(a.name)
     for (const b of B) {
@@ -102,7 +112,6 @@ export function findSamePersonCandidates(people, sources, links) {
       out.push({ a, b, reason, hints, conflict: hints.some((h) => h.endsWith('不同')) })
     }
   }
-  return out.sort((x, y) => Number(x.conflict) - Number(y.conflict))
 }
 
 /**

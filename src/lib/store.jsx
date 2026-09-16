@@ -279,12 +279,14 @@ export function StoreProvider({ children }) {
       let invites = []
       if (fam.data?.kind === 'merged') {
         // 合併家族樹:自己底下沒有資料列,由 get_merged_tree 一次拼好兩個來源家族的資料;橋接關係轉成一般的關係列讓 buildGraph 接起來
-        const [mem, tree] = await Promise.all([
+        const [mem, tree, li] = await Promise.all([
           supabase.from('family_members').select('*').eq('family_id', familyId).order('joined_at'),
           supabase.rpc('get_merged_tree', { p_merged_family_id: familyId }),
+          supabase.from('family_link_invites').select('*').eq('family_id', familyId).is('used_at', null).order('created_at'), // 合併樹也能產生連結碼(再合併)
         ])
         throwIf(mem.error)
         throwIf(tree.error)
+        invites = li.error ? [] : (li.data ?? [])
         const t = tree.data || {}
         const bridges = bridgeRows(t.links ?? [], familyId)
         // 同一人標記:把第二個來源的那個人併進第一個來源的人,雙方的親戚就接在同一張圖上
@@ -709,10 +711,11 @@ export function StoreProvider({ children }) {
       if (error) throw new Error(friendlyError(error))
       const list = await loadMemberships()
       setMemberships(list)
-      switchFamily(data)
+      if (data === familyId) await refresh() // 合併樹再合併:結果就是目前這棵,重抓資料即可
+      else switchFamily(data)
       return data
     },
-    [familyId, loadMemberships, switchFamily],
+    [familyId, loadMemberships, switchFamily, refresh],
   )
 
   const linkSamePerson = useCallback(

@@ -269,6 +269,7 @@ export const VIEW_MODES = [
   { id: 'default', label: '預設', hint: '大家一樣大' },
   { id: 'power', label: '家庭地位', hint: '戰力(地位 + 壽命加成)越高卡片越大' },
   { id: 'rating', label: '讚讚人指數', hint: '指數越高卡片越大' },
+  { id: 'age', label: '年齡', hint: '越年長卡片越大(100 歲最大);已故者用享壽,沒生日的維持一樣大' },
   { id: 'politics', label: '政治立場', hint: '卡片頂端用藍 / 綠 / 白標色' },
   { id: 'custom', label: '自訂', hint: '挑幾項屬性,依它們的平均決定大小' },
 ]
@@ -286,6 +287,10 @@ export function viewPresentation(person, view) {
   if (mode === 'rating') {
     const r = overallRating(person.stats)
     return r ? { level: r.score / 100, badge: `👍 ${r.score}`, tint: null } : { level: null, badge: '', tint: null }
+  }
+  if (mode === 'age') {
+    const l = lifespan(person)
+    return l ? { level: Math.min(1, l.years / 100), badge: `${l.deceased ? '† ' : ''}${l.approx ? '約 ' : ''}${l.years}`, tint: null } : { level: null, badge: '', tint: null }
   }
   if (mode === 'politics') {
     const pol = POLITICS_BY_ID[person.politics]

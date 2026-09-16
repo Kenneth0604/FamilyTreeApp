@@ -1,5 +1,13 @@
 import { describe, it, expect } from 'vitest'
-import { parseDeathAge, lifespan, ageLabel, longevityBonus, totalPower } from './format.js'
+import { parseDeathAge, lifespan, ageLabel, longevityBonus, totalPower, viewPresentation } from './format.js'
+
+describe('format.viewPresentation 年齡', () => {
+  it('依歲數決定大小,已故者用享壽並加 †,沒資料維持原大小', () => {
+    expect(viewPresentation({ is_deceased: true, death_age: '80-90' }, { mode: 'age' })).toEqual({ level: 0.85, badge: '† 約 85', tint: null })
+    expect(viewPresentation({ birth_date: null }, { mode: 'age' }).level).toBeNull()
+    expect(viewPresentation({ birth_date: '1900-01-01' }, { mode: 'age' }).level).toBe(1)
+  })
+})
 
 describe('format.parseDeathAge', () => {
   it('單一數字、範圍、「多」都能解析', () => {
