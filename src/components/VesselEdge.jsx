@@ -65,7 +65,7 @@ export default function VesselEdge({ id, sourceX: hx, sourceY: hy, targetX: hxt,
       )}
       {data.label && (
         <EdgeLabelRenderer>
-          <div className="vessel-label" style={{ transform: `translate(-50%, -50%) translate(${geo.mid.x}px, ${geo.mid.y - 11}px)` }}>
+          <div className="vessel-label" style={{ transform: `translate(-50%, -50%) translate(${geo.mid.x}px, ${geo.mid.y}px)` }}>
             {data.label}
           </div>
         </EdgeLabelRenderer>
