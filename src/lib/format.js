@@ -5,23 +5,47 @@ export const GENDER_LABEL = { male: '男', female: '女', unspecified: '未指�
 export const SPOUSE_STATUS_LABEL = { married: '已婚', partner: '伴侶(未婚)', divorced: '離婚', ex_partner: '前伴侶', widowed: '喪偶' }
 
 /**
- * 壽命 / 年齡:在世者算到今天,已故者算到 death_date(生日與逝世日都要有)。
- * @returns {{ years:number, approx:boolean, deceased:boolean } | null}
+ * 已故者的大概歲數:'85'、'約 85'、'80-90'、'80~90'、'80多'(= 80–89)都吃
+ * @returns {{ lo:number, hi:number } | null}
+ */
+export function parseDeathAge(text) {
+  const s = String(text || '').replace(/\s|歲|約|大約|大概|左右/g, '').replace(/[～〜~–—－]/g, '-')
+  if (!s) return null
+  let m = /^(\d{1,3})-(\d{1,3})$/.exec(s)
+  if (m) {
+    const a = Number(m[1])
+    const b = Number(m[2])
+    return { lo: Math.min(a, b), hi: Math.max(a, b) }
+  }
+  m = /^(\d{1,3})(多|幾|\+)$/.exec(s)
+  if (m) return { lo: Number(m[1]), hi: Number(m[1]) + 9 }
+  m = /^(\d{1,3})$/.exec(s)
+  if (m) return { lo: Number(m[1]), hi: Number(m[1]) }
+  return null
+}
+
+/**
+ * 壽命 / 年齡:在世者算到今天;已故者優先用 生日 + 逝世日 算,沒有的話用填的大概歲數(death_age)。
+ * @returns {{ years:number, approx:boolean, deceased:boolean, range?:[number,number] } | null}
  */
 export function lifespan(person, now = new Date()) {
   if (!person) return null
   const b = parseBirth(person.birth_date)
-  if (!b) return null
   if (!person.is_deceased) {
+    if (!b) return null
     const a = ageFromBirth(person.birth_date, now)
     return a ? { years: a.age, approx: a.approx, deceased: false } : null
   }
   const d = parseBirth(person.death_date)
-  if (!d) return null
-  let years = d.y - b.y
-  const approx = b.m == null || d.m == null || b.d == null || d.d == null
-  if (b.m != null && d.m != null && (d.m < b.m || (d.m === b.m && b.d != null && d.d != null && d.d < b.d))) years -= 1
-  return { years: Math.max(0, years), approx, deceased: true }
+  if (b && d) {
+    let years = d.y - b.y
+    const approx = b.m == null || d.m == null || b.d == null || d.d == null
+    if (b.m != null && d.m != null && (d.m < b.m || (d.m === b.m && b.d != null && d.d != null && d.d < b.d))) years -= 1
+    return { years: Math.max(0, years), approx, deceased: true }
+  }
+  const r = parseDeathAge(person.death_age)
+  if (!r) return null
+  return { years: Math.round((r.lo + r.hi) / 2), approx: true, deceased: true, range: r.lo !== r.hi ? [r.lo, r.hi] : undefined }
 }
 
 /** 已故者的歲數稱法(傳統:60 以下享年、60–89 享壽、90–99 享耆壽、100 以上享嵩壽) */
@@ -32,12 +56,12 @@ export function lifespanPrefix(years) {
   return '享年'
 }
 
-/** 「36 歲」「約 36 歲」「享壽 86 歲」「已故」;沒生日回空字串 */
+/** 「36 歲」「約 36 歲」「享壽 86 歲」「享壽 約 80–90 歲」「已故」;沒資料回空字串 */
 export function ageLabel(person) {
   if (!person) return ''
   const l = lifespan(person)
   if (!l) return person.is_deceased ? '已故' : ''
-  const n = `${l.approx ? '約 ' : ''}${l.years} 歲`
+  const n = l.range ? `約 ${l.range[0]}–${l.range[1]} 歲` : `${l.approx ? '約 ' : ''}${l.years} 歲`
   return l.deceased ? `${lifespanPrefix(l.years)} ${n}` : n
 }
 
@@ -170,7 +194,7 @@ export const LONGEVITY_LEVELS = [
   [70, 2, '古稀'],
   [60, 1, '花甲'],
 ]
-/** @returns {{ bonus:number, title:string|null, years:number|null, deceased:boolean }} 沒生日(或已故但沒逝世日)→ 加成 0 */
+/** @returns {{ bonus:number, title:string|null, years:number|null, deceased:boolean }} 沒生日(或已故但沒逝世日 / 大概歲數)→ 加成 0 */
 export function longevityBonus(person, now = new Date()) {
   const l = lifespan(person, now)
   if (!l) return { bonus: 0, title: null, years: null, deceased: Boolean(person?.is_deceased) }

@@ -14,7 +14,7 @@ const people = [
   P('dad', '爸爸', 'male', '1965', { birth_order: 2, politics: 'blue', stats: { fun: 4, smart: 9, rich: 6 } }),
   P('mom', '媽媽', 'female', '1967'),
   P('ex', '前伴侶', 'female', '1966'),
-  P('mgp', '外公', 'male', '1935', { is_deceased: true, death_date: '2010' }),
+  P('mgp', '外公', 'male', null, { is_deceased: true, death_age: '80-90' }),
   P('mgm', '外婆', 'female', '1940'),
   P('aunt', '阿姨', 'female', '1970'),
   P('aunt_husband', '姨丈', 'male', '1968'),

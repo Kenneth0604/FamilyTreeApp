@@ -7,7 +7,7 @@ import PersonPicker from '../components/PersonPicker.jsx'
 import Avatar from '../components/Avatar.jsx'
 import { parseBirth } from '../lib/kinship/birth.js'
 import { isActiveSpouse } from '../lib/kinship/graph.js'
-import { SPOUSE_STATUS_LABEL, POLITICS, birthOrderLabel, parseList, toPartialDate } from '../lib/format.js'
+import { SPOUSE_STATUS_LABEL, POLITICS, birthOrderLabel, parseList, toPartialDate, parseDeathAge, lifespanPrefix } from '../lib/format.js'
 
 const REL = [
   { id: 'parent', label: '父母', desc: '新成員是這個人的爸爸 / 媽媽' },
@@ -39,6 +39,7 @@ export default function PersonForm() {
   const [deathYear, setDeathYear] = useState('')
   const [deathMonth, setDeathMonth] = useState('')
   const [deathDay, setDeathDay] = useState('')
+  const [deathAge, setDeathAge] = useState('')
   const [birthOrder, setBirthOrder] = useState('')
   const [avatar, setAvatar] = useState(null)
   const [note, setNote] = useState('')
@@ -67,6 +68,7 @@ export default function PersonForm() {
       setDeathYear(d ? String(d.y) : '')
       setDeathMonth(d?.m ? String(d.m) : '')
       setDeathDay(d?.d ? String(d.d) : '')
+      setDeathAge(editing.death_age || '')
       setBirthOrder(editing.birth_order ? String(editing.birth_order) : '')
       setAvatar(editing.avatar_url || null)
       setNote(editing.note || '')
@@ -101,6 +103,7 @@ export default function PersonForm() {
     if (year && (Number(year) < 1 || Number(year) > 9999)) return toast.error('年份格式不正確')
     if (deceased && deathYear && (Number(deathYear) < 1 || Number(deathYear) > 9999)) return toast.error('逝世年份格式不正確')
     if (deceased && deathYear && year && Number(deathYear) < Number(year)) return toast.error('逝世日期不能早於生日')
+    if (deceased && deathAge.trim() && !parseDeathAge(deathAge)) return toast.error('大概歲數請填像 85 或 80-90 這樣的格式')
 
     const fields = {
       name: name.trim(),
@@ -112,6 +115,7 @@ export default function PersonForm() {
       birth_order: birthOrder ? Number(birthOrder) : null,
       is_deceased: deceased,
       death_date: deceased ? toPartialDate(deathYear, deathMonth, deathDay) : null,
+      death_age: deceased && deathAge.trim() ? deathAge.trim() : null,
       avatar_url: avatar,
       note: note.trim(),
     }
@@ -355,6 +359,13 @@ export default function PersonForm() {
               </select>
             </div>
             <p className="mt-1 text-xs text-muted">有生日與逝世日期就會顯示「享壽 N 歲」,壽命也會算進戰力(活很久很帥)。</p>
+            <label className="label mt-3">不確定日期?填大概歲數就好</label>
+            <input value={deathAge} onChange={(e) => setDeathAge(e.target.value)} className="input" placeholder="例如 85、80-90、80多" inputMode="numeric" />
+            <p className="mt-1 text-xs text-muted">
+              {parseDeathAge(deathAge)
+                ? `會顯示「${lifespanPrefix(Math.round((parseDeathAge(deathAge).lo + parseDeathAge(deathAge).hi) / 2))} 約 ${parseDeathAge(deathAge).lo === parseDeathAge(deathAge).hi ? parseDeathAge(deathAge).lo : `${parseDeathAge(deathAge).lo}–${parseDeathAge(deathAge).hi}`} 歲」;有生日 + 逝世日期時以日期為準。`
+                : '沒有生日或逝世日期也沒關係,填「85」或「80-90」,一樣會顯示享壽並算進戰力。'}
+            </p>
           </div>
         )}
         <div>

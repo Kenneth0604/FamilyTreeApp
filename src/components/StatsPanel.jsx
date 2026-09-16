@@ -18,7 +18,7 @@ export default function StatsPanel({ person }) {
   const overall = overallRating(stats)
   const longevityNote = longevity.years == null
     ? person.is_deceased
-      ? '填上生日與逝世日期就會算享壽加成'
+      ? '填逝世日期或大概歲數就會算享壽加成'
       : person.birth_date
         ? ''
         : '填上生日就會自動算'

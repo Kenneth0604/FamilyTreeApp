@@ -129,7 +129,7 @@ export default function PersonDetail() {
               {person.is_deceased && (
                 <>
                   <dt className="text-muted">逝世</dt>
-                  <dd className="text-ink">{deathLabel(person) || <span className="text-muted/70">未填</span>}</dd>
+                  <dd className="text-ink">{deathLabel(person) || (person.death_age ? <span className="text-muted">日期不詳 · 約 {person.death_age} 歲</span> : <span className="text-muted/70">未填</span>)}</dd>
                 </>
               )}
               {person.birth_order && (

@@ -73,6 +73,10 @@ create table if not exists public.people (
 alter table public.people add column if not exists death_date text;
 alter table public.people drop constraint if exists people_death_date_check;
 alter table public.people add constraint people_death_date_check check (death_date is null or death_date ~ '^\d{4}(-\d{2}(-\d{2})?)?$');
+-- 不確定日期時可只填大概歲數:'85'、'80-90'、'80多'(前端解析,這裡只限長度)
+alter table public.people add column if not exists death_age text;
+alter table public.people drop constraint if exists people_death_age_check;
+alter table public.people add constraint people_death_age_check check (death_age is null or length(death_age) <= 20);
 
 alter table public.family_members
   drop constraint if exists family_members_self_person_id_fkey,
