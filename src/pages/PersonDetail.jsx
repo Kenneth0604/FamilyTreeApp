@@ -1,5 +1,5 @@
-import { useMemo, useState } from 'react'
-import { Link, useNavigate, useParams } from 'react-router-dom'
+import { useEffect, useMemo, useRef, useState } from 'react'
+import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import { useStore } from '../lib/store.jsx'
 import { useToast } from '../lib/toast.jsx'
 import Avatar from '../components/Avatar.jsx'
@@ -22,7 +22,21 @@ export default function PersonDetail() {
 
   const [adding, setAdding] = useState(null) // 'parent' | 'child' | 'spouse' | 'sibling' | null
   const [pickId, setPickId] = useState(null)
+  const [linkStatus, setLinkStatus] = useState('married') // 從既有成員建立配偶關係時的狀態
   const [busy, setBusy] = useState(false)
+  // 樹狀圖快速選單的「＋ 父母 / 子女 / 配偶 / 兄弟姊妹」會帶 ?add=… 進來:直接展開該項目的新增欄位並捲到那裡
+  const [params, setParams] = useSearchParams()
+  const panelRef = useRef(null)
+  useEffect(() => {
+    const kind = params.get('add')
+    if (!kind || !['parent', 'child', 'spouse', 'sibling'].includes(kind)) return
+    setAdding(kind)
+    setPickId(null)
+    setParams({}, { replace: true })
+  }, [params, setParams])
+  useEffect(() => {
+    if (adding) panelRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' })
+  }, [adding])
 
   const parents = useMemo(() => parentChild.filter((r) => r.child_id === id), [parentChild, id])
   const children = useMemo(() => parentChild.filter((r) => r.parent_id === id), [parentChild, id])
@@ -68,7 +82,7 @@ export default function PersonDetail() {
     await guard(async () => {
       if (adding === 'parent') await store.addParentChild(pickId, id)
       else if (adding === 'child') await store.addParentChild(id, pickId)
-      else if (adding === 'spouse') await store.addSpouse(id, pickId, 'married')
+      else if (adding === 'spouse') await store.addSpouse(id, pickId, linkStatus)
       else if (adding === 'sibling') {
         const ps = graph.parentsOf.get(id) || []
         if (ps.length === 0) throw new Error(`${person.name} 還沒有父母紀錄,請改用「建立新成員」,系統會協助建立佔位父母`)
@@ -92,6 +106,37 @@ export default function PersonDetail() {
   if (adding === 'child') excludeIds.push(...(graph.childrenOf.get(id) || []))
   if (adding === 'spouse') excludeIds.push(...(graph.spousesOf.get(id) || []).map((s) => s.id))
   if (adding === 'sibling') excludeIds.push(...siblings)
+
+  // 新增欄位:直接開在該項目底下(建立新成員 / 從既有成員選)
+  const ADD_LABEL = { parent: '父母', child: '子女', spouse: '配偶 / 伴侶', sibling: '兄弟姊妹' }
+  const addPanel = (kind) =>
+    canEdit && adding === kind ? (
+      <div ref={panelRef} className="mt-2 rounded-2xl bg-surface-2 p-3">
+        <div className="mb-2 flex items-center justify-between">
+          <p className="text-sm font-semibold text-ink">新增{ADD_LABEL[kind]}</p>
+          <button onClick={() => setAdding(null)} className="text-xs text-muted">
+            取消
+          </button>
+        </div>
+        <Link to={`/people/new?rel=${kind}&of=${id}`} className="btn-primary btn-sm mb-3 w-full">
+          ＋ 建立新成員
+        </Link>
+        <p className="mb-1.5 text-xs text-muted">或從既有成員中選擇:</p>
+        <PersonPicker value={pickId} onChange={setPickId} exclude={excludeIds} />
+        {kind === 'spouse' && (
+          <div className="mt-2 flex flex-wrap gap-1.5">
+            {Object.entries(SPOUSE_STATUS_LABEL).map(([k, v]) => (
+              <button key={k} type="button" onClick={() => setLinkStatus(k)} className={`chip px-2.5 py-1 text-xs ${linkStatus === k ? 'chip-active' : ''}`}>
+                {v}
+              </button>
+            ))}
+          </div>
+        )}
+        <button onClick={linkExisting} disabled={!pickId || busy} className="btn-secondary btn-sm mt-2 w-full">
+          建立關係
+        </button>
+      </div>
+    ) : null
 
   return (
     <div className="space-y-4">
@@ -199,6 +244,7 @@ export default function PersonDetail() {
           peopleById={peopleById}
           busy={busy}
           onAdd={canEdit ? () => { setAdding('parent'); setPickId(null) } : null}
+          panel={addPanel('parent')}
         />
         <RelationGroup
           title="配偶 / 伴侶"
@@ -226,6 +272,7 @@ export default function PersonDetail() {
           peopleById={peopleById}
           busy={busy}
           onAdd={canEdit ? () => { setAdding('spouse'); setPickId(null) } : null}
+          panel={addPanel('spouse')}
         />
         <RelationGroup
           title="子女"
@@ -237,6 +284,7 @@ export default function PersonDetail() {
           peopleById={peopleById}
           busy={busy}
           onAdd={canEdit ? () => { setAdding('child'); setPickId(null) } : null}
+          panel={addPanel('child')}
         />
         <RelationGroup
           title="兄弟姊妹"
@@ -247,26 +295,8 @@ export default function PersonDetail() {
           peopleById={peopleById}
           busy={busy}
           onAdd={canEdit ? () => { setAdding('sibling'); setPickId(null) } : null}
+          panel={addPanel('sibling')}
         />
-
-        {canEdit && adding && (
-          <div className="mt-3 rounded-2xl bg-surface-2 p-3">
-            <div className="mb-2 flex items-center justify-between">
-              <p className="text-sm font-semibold text-ink">新增{{ parent: '父母', child: '子女', spouse: '配偶 / 伴侶', sibling: '兄弟姊妹' }[adding]}</p>
-              <button onClick={() => setAdding(null)} className="text-xs text-muted">
-                取消
-              </button>
-            </div>
-            <Link to={`/people/new?rel=${adding}&of=${id}`} className="btn-primary btn-sm mb-3 w-full">
-              ＋ 建立新成員
-            </Link>
-            <p className="mb-1.5 text-xs text-muted">或從既有成員中選擇:</p>
-            <PersonPicker value={pickId} onChange={setPickId} exclude={excludeIds} />
-            <button onClick={linkExisting} disabled={!pickId || busy} className="btn-secondary btn-sm mt-2 w-full">
-              建立關係
-            </button>
-          </div>
-        )}
       </section>
 
       {/* 生平紀事 */}
@@ -317,7 +347,7 @@ export default function PersonDetail() {
   )
 }
 
-function RelationGroup({ title, hint, empty, items, fromHere, peopleById, busy, onAdd }) {
+function RelationGroup({ title, hint, empty, items, fromHere, peopleById, busy, onAdd, panel = null }) {
   return (
     <div className="border-t border-line py-2.5 first:border-t-0">
       <div className="mb-1.5 flex items-center justify-between">
@@ -325,7 +355,7 @@ function RelationGroup({ title, hint, empty, items, fromHere, peopleById, busy, 
           {title}
           {hint && <span className="ml-1.5 text-xs font-normal text-muted">{hint}</span>}
         </p>
-        {onAdd && (
+        {onAdd && !panel && (
           <button onClick={onAdd} className="text-sm text-primary">
             ＋ 新增
           </button>
@@ -358,6 +388,7 @@ function RelationGroup({ title, hint, empty, items, fromHere, peopleById, busy, 
           )
         })}
       </div>
+      {panel}
     </div>
   )
 }

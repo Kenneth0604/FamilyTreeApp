@@ -752,12 +752,12 @@ function TreeCanvas() {
             </Link>
             {canEdit &&
               ADD_OPTIONS.map(([rel, label]) => (
-                <Link key={rel} to={`/people/new?rel=${rel}&of=${menuId}`} className="btn-primary btn-sm">
+                <Link key={rel} to={`/people/${menuId}?add=${rel}`} className="btn-primary btn-sm">
                   ＋ {label}
                 </Link>
               ))}
           </div>
-          {canEdit && <p className="mt-2 text-[11px] text-muted">新增的人會直接以「{displayName(menuPerson)}」為基準建立關係。</p>}
+          {canEdit && <p className="mt-2 text-[11px] text-muted">會開到「{displayName(menuPerson)}」的詳細頁該項目底下,可建立新成員或選既有成員。</p>}
         </div>
       )}
 
