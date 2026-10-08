@@ -20,18 +20,28 @@ export default function Layout() {
 
   return (
     <div className="mx-auto flex h-full max-w-md flex-col bg-bg landscape:max-w-3xl">
-      <header className="pt-safe hero sticky top-0 z-10 text-white shadow">
-        <div className="flex items-center justify-between gap-3 px-4 py-3">
+      <header className="pt-safe relative z-20 shrink-0" style={{ background: 'transparent' }}>
+        <div style={{
+          position: 'absolute', inset: 0,
+          background: 'linear-gradient(135deg, var(--t-hero-from), var(--t-hero-to))',
+          opacity: 0.92,
+        }} />
+        <div style={{
+          position: 'absolute', inset: 0,
+          WebkitBackdropFilter: 'blur(40px) saturate(180%)',
+          backdropFilter: 'blur(40px) saturate(180%)',
+        }} />
+        <div className="relative flex items-center justify-between gap-3 px-4 py-3">
           <div className="min-w-0">
-            <h1 className="flex items-center gap-1.5 truncate text-lg font-bold tracking-wide">
+            <h1 className="flex items-center gap-1.5 truncate text-lg font-bold tracking-wide text-white">
               <span className="truncate">{family?.name || '家族樹'}</span>
-              {!canEdit && <span className="shrink-0 rounded-full bg-white/20 px-2 py-0.5 text-[11px] font-medium">{family?.kind === 'merged' ? '合併樹 · 只能查看' : '只能查看'}</span>}
+              {!canEdit && <span className="shrink-0 rounded-full bg-white/20 px-2 py-0.5 text-[11px] font-medium" style={{ WebkitBackdropFilter: 'blur(10px)', backdropFilter: 'blur(10px)' }}>{family?.kind === 'merged' ? '合併樹 · 只能查看' : '只能查看'}</span>}
             </h1>
             <p className="truncate text-[11px] text-white/80">
               {viewpointId ? `視角:${nameOf(viewpointId)}` : people.length ? '尚未設定視角(到設定選「我是誰」)' : '從新增第一位成員開始'}
             </p>
           </div>
-          <NavLink to="/settings" className="shrink-0 rounded-full bg-white/20 px-2.5 py-0.5 text-sm font-medium">
+          <NavLink to="/settings" className="shrink-0 rounded-full bg-white/20 px-2.5 py-0.5 text-sm font-medium" style={{ WebkitBackdropFilter: 'blur(10px)', backdropFilter: 'blur(10px)' }}>
             {member?.display_name || '我'}
           </NavLink>
         </div>
@@ -62,19 +72,31 @@ export default function Layout() {
         <Outlet />
       </main>
 
-      <nav className="pb-safe z-10 shrink-0 border-t border-line bg-surface">
-        <div className="mx-auto grid max-w-md landscape:max-w-3xl" style={{ gridTemplateColumns: `repeat(${nav.length}, minmax(0, 1fr))` }}>
-          {nav.map(({ to, label, icon: Icon, end }) => (
-            <NavLink
-              key={to}
-              to={to}
-              end={end}
-              className={({ isActive }) => `relative flex flex-col items-center gap-0.5 py-2 text-[11px] ${isActive ? 'text-primary' : 'text-muted'}`}
-            >
-              <Icon className="h-6 w-6" />
-              {label}
-            </NavLink>
-          ))}
+      <nav className="relative z-10 shrink-0" style={{ background: 'transparent' }}>
+        <div style={{
+          position: 'absolute', inset: 0,
+          background: 'var(--t-surface)',
+          opacity: 0.92,
+        }} />
+        <div style={{
+          position: 'absolute', inset: 0,
+          WebkitBackdropFilter: 'blur(40px) saturate(180%)',
+          backdropFilter: 'blur(40px) saturate(180%)',
+        }} />
+        <div className="relative" style={{ borderTop: '0.5px solid var(--t-line)' }}>
+          <div className="mx-auto grid max-w-md landscape:max-w-3xl" style={{ gridTemplateColumns: `repeat(${nav.length}, minmax(0, 1fr))` }}>
+            {nav.map(({ to, label, icon: Icon, end }) => (
+              <NavLink
+                key={to}
+                to={to}
+                end={end}
+                className={({ isActive }) => `relative flex flex-col items-center gap-0.5 py-2 text-[10px] font-medium tracking-tight transition-colors duration-200 ${isActive ? 'text-primary' : 'text-muted'}`}
+              >
+                <Icon className="h-6 w-6" />
+                {label}
+              </NavLink>
+            ))}
+          </div>
         </div>
       </nav>
     </div>

@@ -70,6 +70,42 @@
   --t-vessel-ended-line: #c4a7b6;
 }
 
+[data-theme="apple"] {
+  color-scheme: light;
+  --t-bg: #f2f2f7;
+  --t-surface: rgba(255, 255, 255, 0.82);
+  --t-surface-2: #e8e8ed;
+  --t-line: rgba(60, 60, 67, 0.12);
+  --t-ink: #1c1c1e;
+  --t-muted: #8e8e93;
+  --t-primary: #007aff;
+  --t-primary-fg: #ffffff;
+  --t-primary-soft: rgba(0, 122, 255, 0.1);
+  --t-accent: #34c759;
+  --t-accent-soft: rgba(52, 199, 89, 0.1);
+  --t-success: #34c759;
+  --t-success-soft: rgba(52, 199, 89, 0.12);
+  --t-danger: #ff3b30;
+  --t-danger-soft: rgba(255, 59, 48, 0.12);
+  --t-warning: #ff9500;
+  --t-warning-soft: rgba(255, 149, 0, 0.12);
+  --t-info: #5856d6;
+  --t-info-soft: rgba(88, 86, 214, 0.12);
+  --t-male: #007aff;
+  --t-male-soft: rgba(0, 122, 255, 0.1);
+  --t-female: #ff2d55;
+  --t-female-soft: rgba(255, 45, 85, 0.1);
+  --t-hero-from: #007aff;
+  --t-hero-to: #5856d6;
+  --t-vessel: #d9738f;
+  --t-vessel-core: #eea3b8;
+  --t-vessel-flow: #fff6f9;
+  --t-vessel-partner: #b79ae8;
+  --t-vessel-partner-core: #d3c3f4;
+  --t-vessel-ended: #d9c4cf;
+  --t-vessel-ended-line: #c4a7b6;
+}
+
 /* 黑黑:黑灰色系 */
 [data-theme="graphite"] {
   color-scheme: dark;
@@ -125,10 +161,12 @@ body {
   color: var(--t-ink);
   -webkit-tap-highlight-color: transparent;
   -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
   -webkit-touch-callout: none;
   -webkit-user-select: none;
   user-select: none;
   overscroll-behavior: none;
+  font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Helvetica Neue", system-ui, sans-serif;
 }
 
 #root {
@@ -229,24 +267,71 @@ input[type="date"], input[type="number"] {
 .react-flow__node.person-dragging > .card { filter: drop-shadow(0 12px 16px rgb(0 0 0 / 0.3)); cursor: grabbing; }
 
 @layer components {
-  .card { @apply rounded-2xl bg-surface shadow-sm ring-1 ring-line; }
-  .btn, .btn-primary, .btn-secondary, .btn-success, .btn-danger, .btn-danger-outline {
-    @apply inline-flex items-center justify-center gap-1.5 rounded-2xl px-4 py-3 font-semibold transition active:scale-[0.98] disabled:opacity-40 disabled:active:scale-100;
+  .card {
+    @apply overflow-hidden rounded-2xl;
+    background: var(--t-surface);
+    -webkit-backdrop-filter: blur(40px) saturate(180%);
+    backdrop-filter: blur(40px) saturate(180%);
   }
-  .btn-primary { @apply bg-primary text-primary-fg shadow; }
-  .btn-secondary { @apply bg-surface text-ink ring-1 ring-line; }
-  .btn-success { @apply bg-success text-white shadow; }
-  .btn-danger { @apply bg-danger text-white shadow; }
-  .btn-danger-outline { @apply bg-surface text-danger ring-1 ring-danger/40; }
+  .btn, .btn-primary, .btn-secondary, .btn-success, .btn-danger, .btn-danger-outline {
+    @apply inline-flex items-center justify-center gap-1.5 rounded-xl px-5 py-3 font-semibold text-[15px] transition-all active:scale-[0.97] disabled:opacity-40 disabled:active:scale-100;
+    -webkit-tap-highlight-color: transparent;
+  }
+  .btn-primary { @apply bg-primary text-primary-fg; }
+  .btn-secondary {
+    background: var(--t-surface);
+    color: var(--t-ink);
+    -webkit-backdrop-filter: blur(40px) saturate(180%);
+    backdrop-filter: blur(40px) saturate(180%);
+    border: 0.5px solid var(--t-line);
+  }
+  .btn-success { @apply bg-success text-white; }
+  .btn-danger { @apply bg-danger text-white; }
+  .btn-danger-outline {
+    background: transparent;
+    color: var(--t-danger);
+    border: 1px solid var(--t-danger);
+  }
   .btn-sm { @apply px-3 py-1.5 text-sm rounded-xl; }
-  .chip { @apply inline-flex items-center justify-center rounded-full px-3 py-1.5 text-sm font-medium ring-1 ring-line bg-surface text-ink; }
-  .chip-active { @apply bg-primary text-primary-fg ring-primary; }
-  .input { @apply w-full min-w-0 max-w-full rounded-xl border border-line bg-surface px-3 py-2.5 text-base text-ink outline-none placeholder:text-muted/70 focus:border-primary focus:ring-2 focus:ring-primary/25; }
+  .chip {
+    @apply inline-flex items-center justify-center rounded-full px-3.5 py-1.5 text-sm font-medium transition-all active:scale-[0.96];
+    background: var(--t-surface);
+    color: var(--t-ink);
+    border: 0.5px solid var(--t-line);
+    -webkit-backdrop-filter: blur(20px) saturate(180%);
+    backdrop-filter: blur(20px) saturate(180%);
+  }
+  .chip-active {
+    background: var(--t-primary);
+    color: var(--t-primary-fg);
+    border-color: transparent;
+  }
+  .input {
+    @apply w-full min-w-0 max-w-full rounded-xl px-4 py-3 text-[17px] text-ink outline-none transition-all duration-200;
+    background: var(--t-surface-2);
+    border: 0.5px solid transparent;
+    font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", system-ui, sans-serif;
+  }
+  .input:focus {
+    border-color: var(--t-primary);
+    background: var(--t-surface);
+    box-shadow: 0 0 0 4px rgba(0,122,255,0.1);
+  }
   textarea.input { resize: none; }
   select.input { text-overflow: ellipsis; }
-  .label { @apply mb-1.5 block text-sm font-medium text-ink; }
-  .section-title { @apply mb-2 flex items-center gap-2 text-sm font-semibold text-ink; }
-  .empty { @apply rounded-2xl bg-surface p-6 text-center text-sm text-muted shadow-sm ring-1 ring-line; }
+  .label {
+    @apply mb-1.5 block text-[13px] font-semibold tracking-tight text-ink;
+    letter-spacing: -0.01em;
+  }
+  .section-title {
+    @apply mb-2 flex items-center gap-2 px-1 text-[13px] font-semibold uppercase tracking-wide text-muted;
+  }
+  .empty {
+    @apply rounded-2xl p-8 text-center text-[15px] text-muted;
+    background: var(--t-surface);
+    -webkit-backdrop-filter: blur(40px) saturate(180%);
+    backdrop-filter: blur(40px) saturate(180%);
+  }
   /* 稱謂標籤:exact 正常、approx 帶提示、fallback 較淡 */
   .term { @apply inline-flex items-center rounded-full px-2 py-0.5 text-xs font-semibold; }
   .term-exact { @apply bg-primary-soft text-primary; }
