@@ -2,6 +2,7 @@ import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { ReactFlow, Background, Controls, Handle, Position, useReactFlow, ReactFlowProvider } from '@xyflow/react'
 import { useStore } from '../lib/store.jsx'
+import { useSpringPositions } from '../lib/useSpringPositions.js'
 import { layoutTree, layoutRadial, NODE_W, NODE_H, GAP_Y } from '../lib/treeLayout.js'
 import Avatar from '../components/Avatar.jsx'
 import TermBadge from '../components/TermBadge.jsx'
@@ -167,6 +168,10 @@ export default function Tree() {
   )
 }
 
+// 尺寸都是我們算好的,直接告訴 React Flow;不然每次換新的 node 物件它都要先藏起來重新量,
+// 位置動畫期間卡片會整個消失
+const fixedSize = (width, height) => ({ width, height, measured: { width, height } })
+
 function TreeCanvas() {
   const { familyId, people, graph, terms, viewpointId, selfId, parentChild, spouses, peopleById, canEdit, households = [] } = useStore()
   const navigate = useNavigate()
@@ -230,7 +235,7 @@ function TreeCanvas() {
     setSelectedId(null)
   }
 
-  const positions = useMemo(() => {
+  const targetPositions = useMemo(() => {
     const out = new Map()
     for (const [id, p] of layout.positions) {
       const d = overrides.get(id)
@@ -238,6 +243,25 @@ function TreeCanvas() {
     }
     return out
   }, [layout, overrides])
+  // 切換視角 / 排版 / 顯示方式或重新排版時,卡片(連同血管、小家庭外框)用彈簧滑到新位置;
+  // 新增的人從父母目前的位置長出來。拖曳卡片時直接跟手、不做動畫。
+  const parentsOfRef = useRef(new Map())
+  parentsOfRef.current = useMemo(() => {
+    const m = new Map()
+    for (const r of parentChild) {
+      if (!m.has(r.child_id)) m.set(r.child_id, [])
+      m.get(r.child_id).push(r.parent_id)
+    }
+    return m
+  }, [parentChild])
+  const originOf = useCallback((id, current) => {
+    for (const pid of parentsOfRef.current.get(id) || []) {
+      const s = current.get(pid)
+      if (s) return s
+    }
+    return null
+  }, [])
+  const positions = useSpringPositions(targetPositions, { snap: draggingId !== null, originOf })
   const resetLayout = () => setOverrides(new Map())
   // 卡片的實際矩形:x 就是排版給的位置(寬度已算進去),縮放後在列內垂直置中
   const boxes = useMemo(() => {
@@ -403,6 +427,7 @@ function TreeCanvas() {
           type: 'household',
           position: { x: outline.x, y: outline.y },
           style: { width: outline.w, height: outline.h },
+          ...fixedSize(outline.w, outline.h),
           zIndex: -1,
           data: { name: hh.name, color: householdColor(hh.color), path: outline.path, x: outline.x, y: outline.y, w: outline.w, h: outline.h, labelX: topMember.x - HOUSEHOLD_PAD + 10 - outline.x, labelY: topMember.y - HOUSEHOLD_PAD - HOUSEHOLD_LABEL_H + 4 - outline.y },
           draggable: false,
@@ -533,6 +558,7 @@ function TreeCanvas() {
         type: 'person',
         position: { x: c.x, y: c.y },
         style: { width: c.w, height: c.h },
+        ...fixedSize(c.w, c.h),
         className: [draggingId === c.p.id && 'person-dragging', layoutMode && selectedId === c.p.id && 'person-selected'].filter(Boolean).join(' ') || undefined,
         data: {
           person: c.p, term: terms.get(c.p.id) ?? null, isViewpoint: c.p.id === viewpointId, isSelf: c.p.id === selfId,
@@ -545,6 +571,7 @@ function TreeCanvas() {
         id: j.id,
         type: 'junction',
         position: { x: j.x - JUNCTION_SIZE / 2, y: j.y - JUNCTION_SIZE / 2 },
+        ...fixedSize(JUNCTION_SIZE, JUNCTION_SIZE),
         data: { thin: j.thin },
         draggable: false,
         selectable: false,
@@ -553,6 +580,7 @@ function TreeCanvas() {
         id: p.id,
         type: 'port',
         position: { x: p.x - PORT_SIZE / 2, y: p.y - PORT_SIZE / 2 },
+        ...fixedSize(PORT_SIZE, PORT_SIZE),
         data: { status: p.status },
         zIndex: 5, // 蓋在卡片邊緣上
         draggable: false,
@@ -591,10 +619,10 @@ function TreeCanvas() {
 
   // 以 viewpoint 為中心
   const focusViewpoint = useCallback(() => {
-    const pos = viewpointId && positions.get(viewpointId)
+    const pos = viewpointId && targetPositions.get(viewpointId)
     if (pos) setCenter(pos.x + NODE_W / 2, pos.y + NODE_H / 2, { zoom: 0.9, duration: 400 })
     else fitView({ padding: 0.2, duration: 400 })
-  }, [viewpointId, positions, setCenter, fitView])
+  }, [viewpointId, targetPositions, setCenter, fitView])
 
   const first = useRef(true)
   useEffect(() => {
@@ -607,6 +635,15 @@ function TreeCanvas() {
     }, 50)
     return () => clearTimeout(t)
   }, [nodes.length, focusViewpoint])
+
+  // 切換排版或視角後,鏡頭跟著卡片一起移到新的視角位置
+  const prevView = useRef({ arrangement, viewpointId })
+  useEffect(() => {
+    const prev = prevView.current
+    prevView.current = { arrangement, viewpointId }
+    if (first.current || (prev.arrangement === arrangement && prev.viewpointId === viewpointId)) return
+    focusViewpoint()
+  }, [arrangement, viewpointId, focusViewpoint])
 
   if (people.length === 0) {
     return (
