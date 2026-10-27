@@ -46,6 +46,16 @@ const spouses = [
   { id: 's8', person_a_id: 'uncle', person_b_id: 'aunt', status: 'divorced' },
 ]
 
+const entries = [
+  { id: 'e1', person_id: 'gp', category: 'event', title: '從福州遷居來台', start_date: '1958' },
+  { id: 'e2', person_id: 'gp', category: 'career', title: '開設雜貨店', start_date: '1966-04' },
+  { id: 'e3', person_id: 'dad', category: 'education', title: '台大機械系畢業', start_date: '1987-06' },
+  { id: 'e4', person_id: 'me', category: 'career', title: '第一份工作:軟體工程師', start_date: '2013-07' },
+  { id: 'e5', person_id: 'me', category: 'residence', title: '搬到台北', start_date: '2016' },
+  { id: 'e6', person_id: 'gm', category: 'award', title: '社區模範母親', start_date: '1999-05' },
+]
+const pets = [{ id: 'pet1', name: '小黑', species: 'dog', birth_date: '2015-08', owner_person_id: 'me', gender: 'male' }]
+
 export function useStore() {
   return useMemo(() => {
     const graph = buildGraph({ people, parentChild, spouses })
@@ -58,6 +68,8 @@ export function useStore() {
         { id: 'h2', name: '我家', color: 'primary', person_ids: ['me', 'wife', 'kid'] },
       ],
       people,
+      entries,
+      pets,
       parentChild,
       spouses,
       graph,

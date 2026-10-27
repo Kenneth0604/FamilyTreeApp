@@ -14,6 +14,7 @@ export default function Layout() {
   const nav = [
     { to: '/', label: '樹狀圖', icon: TreeIcon, end: true },
     { to: '/people', label: '成員', icon: PeopleIcon },
+    { to: '/timeline', label: '時間軸', icon: ClockIcon },
     canEdit ? { to: '/people/new', label: '新增', icon: PlusIcon } : null,
     { to: '/settings', label: '設定', icon: GearIcon },
   ].filter(Boolean)
@@ -112,6 +113,16 @@ function TreeIcon({ className }) {
       <circle cx="6" cy="19" r="2.5" />
       <circle cx="18" cy="19" r="2.5" />
       <path d="M12 7.5V12M12 12H6v4.5M12 12h6v4.5" />
+    </svg>
+  )
+}
+function ClockIcon({ className }) {
+  return (
+    <svg className={className} {...svgProps}>
+      <path d="M12 3v18" />
+      <circle cx="12" cy="7" r="2" />
+      <circle cx="12" cy="17" r="2" />
+      <path d="M14 7h6M4 12h6M14 17h4" />
     </svg>
   )
 }

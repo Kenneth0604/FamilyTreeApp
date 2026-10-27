@@ -14,6 +14,7 @@ import PetDetail from './pages/PetDetail.jsx'
 import Households from './pages/Households.jsx'
 import MergedMatches from './pages/MergedMatches.jsx'
 import Settings from './pages/Settings.jsx'
+import Timeline from './pages/Timeline.jsx'
 
 export default function App() {
   const { configured, authLoading, authUser, memberships, membershipsError, retryMemberships, familyId, ready, fatal, retry, logout, canEdit } = useStore()
@@ -58,6 +59,7 @@ export default function App() {
         <Route path="pets/new" element={canEdit ? <PetForm /> : <Navigate to="/people" replace />} />
         <Route path="pets/:id" element={<PetDetail />} />
         <Route path="pets/:id/edit" element={canEdit ? <PetForm /> : <Navigate to="/people" replace />} />
+        <Route path="timeline" element={<Timeline />} />
         <Route path="households" element={<Households />} />
         <Route path="merged-matches" element={<MergedMatches />} />
         <Route path="settings" element={<Settings />} />
